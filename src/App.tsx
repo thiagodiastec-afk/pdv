@@ -46,52 +46,47 @@ import { DesktopInstallerModal } from './components/DesktopInstallerModal';
 
 type ActiveWorkspace = 'POS' | 'NFCE_HISTORY' | 'CATALOG' | 'CONFIG_FISCAL';
 
+type Snapshot = {
+  products: Product[];
+  cart: CartItem[];
+  invoices: FiscalInvoice[];
+  movements: CashMovement[];
+  storeConfig: typeof INITIAL_STORE_CONFIG;
+};
+
+const SNAPSHOT_KEY = 'cromapdv_snapshot_v1';
+
+function readLegacy<T>(key: string, fallback: T): T {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function readSnapshot(): Snapshot & { saved: string | null } {
+  try {
+    const saved = localStorage.getItem(SNAPSHOT_KEY);
+    if (saved) return { ...JSON.parse(saved), saved };
+  } catch {
+    // Legacy values remain available if the snapshot could not be read.
+  }
+  return {
+    saved: null,
+    products: readLegacy('cromapdv_products_v1', INITIAL_PRODUCTS),
+    cart: readLegacy('cromapdv_cart_v1', INITIAL_CART),
+    invoices: readLegacy('cromapdv_invoices_v1', INITIAL_INVOICES),
+    movements: readLegacy('cromapdv_movements_v1', INITIAL_MOVEMENTS),
+    storeConfig: { ...INITIAL_STORE_CONFIG, ...readLegacy('cromapdv_store_config_v2', {}) },
+  };
+}
+
 export default function App() {
-  // Persistent state with localStorage fallback
-  const [products, setProducts] = useState<Product[]>(() => {
-    try {
-      const saved = localStorage.getItem('cromapdv_products_v1');
-      return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
-    } catch {
-      return INITIAL_PRODUCTS;
-    }
-  });
+  const [snapshot, setSnapshot] = useState(readSnapshot);
+  const snapshotRef = useRef(snapshot);
+  const { products, invoices, movements, storeConfig, cart } = snapshot;
 
-  const [cart, setCart] = useState<CartItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('cromapdv_cart_v1');
-      return saved ? JSON.parse(saved) : INITIAL_CART;
-    } catch {
-      return INITIAL_CART;
-    }
-  });
-
-  const [invoices, setInvoices] = useState<FiscalInvoice[]>(() => {
-    try {
-      const saved = localStorage.getItem('cromapdv_invoices_v1');
-      return saved ? JSON.parse(saved) : INITIAL_INVOICES;
-    } catch {
-      return INITIAL_INVOICES;
-    }
-  });
-
-  const [movements, setMovements] = useState<CashMovement[]>(() => {
-    try {
-      const saved = localStorage.getItem('cromapdv_movements_v1');
-      return saved ? JSON.parse(saved) : INITIAL_MOVEMENTS;
-    } catch {
-      return INITIAL_MOVEMENTS;
-    }
-  });
-
-  const [storeConfig, setStoreConfig] = useState<typeof INITIAL_STORE_CONFIG>(() => {
-    try {
-      const saved = localStorage.getItem('cromapdv_store_config_v2');
-      return saved ? { ...INITIAL_STORE_CONFIG, ...JSON.parse(saved) } : INITIAL_STORE_CONFIG;
-    } catch {
-      return INITIAL_STORE_CONFIG;
-    }
-  });
   const [workspace, setWorkspace] = useState<ActiveWorkspace>('POS');
   const [selectedCategory, setSelectedCategory] = useState<CategoryId>('Bebidas');
   const [useReferenceSixGrid, setUseReferenceSixGrid] = useState<boolean>(true);
@@ -121,46 +116,6 @@ export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('cromapdv_products_v1', JSON.stringify(products));
-    } catch {
-      // ignore storage errors
-    }
-  }, [products]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('cromapdv_cart_v1', JSON.stringify(cart));
-    } catch {
-      // ignore storage errors
-    }
-  }, [cart]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('cromapdv_invoices_v1', JSON.stringify(invoices));
-    } catch {
-      // ignore storage errors
-    }
-  }, [invoices]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('cromapdv_movements_v1', JSON.stringify(movements));
-    } catch {
-      // ignore storage errors
-    }
-  }, [movements]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('cromapdv_store_config_v2', JSON.stringify(storeConfig));
-    } catch {
-      // ignore storage errors
-    }
-  }, [storeConfig]);
-
-  useEffect(() => {
     const updateClock = () => {
       const now = new Date();
       const d = now.toLocaleDateString('pt-BR', {
@@ -186,6 +141,49 @@ export default function App() {
     }, 2800);
   };
 
+  async function saveSnapshot(update: (current: Snapshot) => Snapshot) {
+    try {
+      return await navigator.locks.request(SNAPSHOT_KEY, () => {
+        const stored = localStorage.getItem(SNAPSHOT_KEY);
+        const current = snapshotRef.current;
+        if (stored !== current.saved) {
+          const latest = readSnapshot();
+          snapshotRef.current = latest;
+          setSnapshot(latest);
+          triggerToast('Dados atualizados em outra aba. Confira e repita a operação.');
+          return false;
+        }
+        const next = update(current);
+        const saved = JSON.stringify({ ...next, saved: undefined });
+        localStorage.setItem(SNAPSHOT_KEY, saved);
+        const committed = { ...next, saved };
+        snapshotRef.current = committed;
+        setSnapshot(committed);
+        return true;
+      });
+    } catch {
+      triggerToast('Não foi possível salvar os dados. Tente novamente em uma aba segura.');
+      return false;
+    }
+  }
+
+  function setField<K extends keyof Snapshot>(key: K) {
+    return (update: React.SetStateAction<Snapshot[K]>) => {
+      void saveSnapshot((current) => ({
+        ...current,
+        [key]: typeof update === 'function'
+          ? (update as (previous: Snapshot[K]) => Snapshot[K])(current[key])
+          : update,
+      }));
+    };
+  }
+
+  const setProducts = setField('products');
+  const setCart = setField('cart');
+  const setInvoices = setField('invoices');
+  const setMovements = setField('movements');
+  const setStoreConfig = setField('storeConfig');
+
   const subtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
   const effectiveDiscount = Math.min(discount, subtotal);
   const total = Math.max(0, subtotal - effectiveDiscount);
@@ -193,6 +191,11 @@ export default function App() {
   const addToCart = (product: Product, qty = 1) => {
     if (!isRegisterOpen) {
       triggerToast('Caixa fechado! Reabra o caixa (F7) para registrar vendas.');
+      return;
+    }
+    const available = products.find((item) => item.id === product.id)?.stock ?? 0;
+    if ((cart.find((item) => item.product.id === product.id)?.quantity ?? 0) + qty > available) {
+      triggerToast("Estoque insuficiente.");
       return;
     }
     setCart((prev) => {
@@ -210,6 +213,12 @@ export default function App() {
   };
 
   const updateCartQuantity = (productId: string, delta: number) => {
+    const item = cart.find((entry) => entry.product.id === productId);
+    const available = products.find((product) => product.id === productId)?.stock ?? 0;
+    if (delta > 0 && item && item.quantity + delta > available) {
+      triggerToast("Estoque insuficiente.");
+      return;
+    }
     setCart((prev) =>
       prev
         .map((item) =>
@@ -327,13 +336,16 @@ export default function App() {
 
   // Simulate barcode reader beep
   const handleSimulateBarcodeScan = () => {
-    const sample = products[Math.floor(Math.random() * 6)] || products[0];
+    const sample = products[Math.floor(Math.random() * products.length)];
+    if (!sample) {
+      triggerToast("Cadastre um produto para simular a leitura.");
+      return;
+    }
     addToCart(sample, 1);
-    triggerToast(`Leitor EAN: ${sample.barcode} — ${sample.name} (${formatBRL(sample.price)})`);
   };
 
   // Confirm sale and issue NFC-e
-  const handleConfirmSale = (payload: {
+  const handleConfirmSale = async (payload: {
     paymentMethod: PaymentMethod;
     amountTendered: number;
     changeAmount: number;
@@ -341,6 +353,17 @@ export default function App() {
     customerName: string;
     emitirNfce: boolean;
   }) => {
+    if (!isRegisterOpen || cart.length === 0) {
+      triggerToast("Abra o caixa e adicione produtos para finalizar.");
+      return;
+    }
+    const unavailable = cart.find(({ product, quantity }) =>
+      quantity > (products.find((entry) => entry.id === product.id)?.stock ?? 0)
+    );
+    if (unavailable) {
+      triggerToast(`Estoque insuficiente: ${unavailable.product.name}.`);
+      return;
+    }
     const now = new Date();
     const formattedTimestamp = `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR')}`;
     const numeroNfce = storeConfig.proximoNumeroNfce;
@@ -361,7 +384,7 @@ export default function App() {
       0
     );
 
-    const newInvoice: FiscalInvoice = {
+    const newInvoice: FiscalInvoice | null = payload.emitirNfce ? {
       id: `inv-${numeroNfce}-${Date.now()}`,
       numero: numeroNfce,
       serie: storeConfig.seriePadrao,
@@ -383,79 +406,82 @@ export default function App() {
       ambienteEmissao: storeConfig.ambienteSefaz,
       tribFederal,
       tribEstadual,
-    };
+    } : null;
 
     const saleMovement: CashMovement = {
       id: `mov-${Date.now()}`,
       type: 'VENDA',
       amount: total,
       paymentMethod: payload.paymentMethod,
-      description: `Venda NFC-e #${String(numeroNfce).padStart(6, '0')}`,
+      description: newInvoice ? `Venda com NFC-e simulada #${String(numeroNfce).padStart(6, '0')}` : "Venda sem NFC-e",
       createdAt: formattedTimestamp,
       operatorName: 'Maurício',
-      invoiceNumero: numeroNfce,
+      invoiceNumero: newInvoice?.numero,
     };
 
-    setInvoices((prev) => [newInvoice, ...prev]);
-    setMovements((prev) => [saleMovement, ...prev]);
-    setStoreConfig((prev) => ({
-      ...prev,
-      proximoNumeroNfce: prev.proximoNumeroNfce + 1,
-    }));
-
-    // Update stock
-    setProducts((prev) =>
-      prev.map((prod) => {
-        const soldItem = cart.find((c) => c.product.id === prod.id);
-        return soldItem
-          ? { ...prod, stock: Math.max(0, prod.stock - soldItem.quantity) }
-          : prod;
-      })
-    );
-
+    const saved = await saveSnapshot((current) => {
+      if (snapshotRef.current !== snapshot) throw new Error('Venda alterada durante a finalização');
+      return {
+        ...current,
+        invoices: newInvoice ? [newInvoice, ...invoices] : invoices,
+        movements: [saleMovement, ...movements],
+        storeConfig: newInvoice
+          ? { ...storeConfig, proximoNumeroNfce: numeroNfce + 1 }
+          : storeConfig,
+        products: products.map((product) => {
+          const soldItem = cart.find((item) => item.product.id === product.id);
+          return soldItem ? { ...product, stock: product.stock - soldItem.quantity } : product;
+        }),
+        cart: [],
+      };
+    });
+    if (!saved) return;
     setShowCheckoutModal(false);
-    setCart([]);
     setDiscount(0);
     setCustomerCpf('');
     setCustomerName('');
     setActiveDanfeInvoice(newInvoice);
+    if (!newInvoice) triggerToast("Venda registrada sem NFC-e.");
   };
 
-  const handleCancelInvoice = (invoiceId: string, reason: string) => {
+  const handleCancelInvoice = async (invoiceId: string, reason: string) => {
     const target = invoices.find((i) => i.id === invoiceId);
-    if (!target) return;
-
-    setInvoices((prev) =>
-      prev.map((inv) =>
-        inv.id === invoiceId
-          ? { ...inv, status: 'CANCELADA', cancelReason: reason }
-          : inv
-      )
-    );
+    if (!target || target.status !== "AUTORIZADA") return;
 
     const now = new Date();
     const formattedTimestamp = `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR')}`;
-
-    setMovements((prev) => [
-      {
-        id: `mov-est-${Date.now()}`,
-        type: 'ESTORNO',
-        amount: target.total,
-        paymentMethod: target.paymentMethod,
-        description: `Estorno NFC-e #${String(target.numero).padStart(6, '0')} (${reason})`,
-        createdAt: formattedTimestamp,
-        operatorName: 'Maurício',
-        invoiceNumero: target.numero,
-      },
-      ...prev,
-    ]);
+    const reversal: CashMovement = {
+      id: `mov-est-${Date.now()}`,
+      type: 'ESTORNO',
+      amount: target.total,
+      paymentMethod: target.paymentMethod,
+      description: `Estorno NFC-e #${String(target.numero).padStart(6, '0')} (${reason})`,
+      createdAt: formattedTimestamp,
+      operatorName: 'Maurício',
+      invoiceNumero: target.numero,
+    };
+    const saved = await saveSnapshot((current) => {
+      if (snapshotRef.current !== snapshot) throw new Error('Nota alterada durante o cancelamento');
+      return {
+        ...current,
+        invoices: invoices.map((invoice) => invoice.id === invoiceId
+          ? { ...invoice, status: 'CANCELADA', cancelReason: reason }
+          : invoice),
+        movements: [reversal, ...movements],
+        products: products.map((product) => {
+          const returned = target.items.find((item) => item.product.id === product.id);
+          return returned ? { ...product, stock: product.stock + returned.quantity } : product;
+        }),
+      };
+    });
+    if (!saved) return;
 
     setActiveDanfeInvoice((prev) =>
       prev && prev.id === invoiceId
         ? { ...prev, status: 'CANCELADA', cancelReason: reason }
         : prev
     );
-    triggerToast(`NFC-e #${String(target.numero).padStart(6, '0')} cancelada na SEFAZ.`);
+    triggerToast(`NFC-e #${String(target.numero).padStart(6, '0')} cancelada na simulação.`);
   };
 
   const handleAddCashMovement = (
@@ -633,7 +659,7 @@ export default function App() {
                   : inv
               )
             );
-            triggerToast('Nota em contingência transmitida e autorizada na SEFAZ (cStat 100)!');
+            triggerToast('Autorização da nota em contingência simulada.');
           }}
           onBackToPos={() => setWorkspace('POS')}
         />
@@ -644,21 +670,25 @@ export default function App() {
             setProducts((prev) => [newProd, ...prev]);
             triggerToast(`Produto "${newProd.name}" cadastrado com NCM ${newProd.ncm}.`);
           }}
-          onUpdateProduct={(updatedProd) => {
-            setProducts((prev) =>
-              prev.map((p) => (p.id === updatedProd.id ? updatedProd : p))
-            );
-            setCart((prev) =>
-              prev.map((item) =>
+          onUpdateProduct={async (updatedProd) => {
+            const saved = await saveSnapshot((current) => ({
+              ...current,
+              products: current.products.map((p) => p.id === updatedProd.id ? updatedProd : p),
+              cart: current.cart.map((item) =>
                 item.product.id === updatedProd.id ? { ...item, product: updatedProd } : item
-              )
-            );
+              ),
+            }));
+            if (!saved) return;
             triggerToast(`Produto "${updatedProd.name}" atualizado com sucesso.`);
           }}
-          onDeleteProduct={(id) => {
+          onDeleteProduct={async (id) => {
             const target = products.find((p) => p.id === id);
-            setProducts((prev) => prev.filter((p) => p.id !== id));
-            setCart((prev) => prev.filter((item) => item.product.id !== id));
+            const saved = await saveSnapshot((current) => ({
+              ...current,
+              products: current.products.filter((p) => p.id !== id),
+              cart: current.cart.filter((item) => item.product.id !== id),
+            }));
+            if (!saved) return;
             if (target) {
               triggerToast(`Produto "${target.name}" removido do catálogo.`);
             }
@@ -683,7 +713,7 @@ export default function App() {
                   : inv
               )
             );
-            triggerToast('Lote de notas em contingência transmitido e autorizado na SEFAZ!');
+            triggerToast('Autorização do lote em contingência simulada.');
           }}
           onBackToPos={() => setWorkspace('POS')}
         />
@@ -990,6 +1020,9 @@ export default function App() {
       )}
 
       {/* Checkout & NFC-e Emission Modal */}
+      <div role="status" className="fixed bottom-0 left-0 z-40 bg-amber-950 px-3 py-1 text-xs text-amber-100 print:hidden">
+        Modo demonstração fiscal · sem comunicação com a SEFAZ
+      </div>
       {showCheckoutModal && (
         <CheckoutModal
           items={cart}
@@ -1215,7 +1248,7 @@ export default function App() {
             <div className="space-y-2 text-xs text-slate-300 font-mono">
               <div className="flex justify-between py-1 border-b border-white/5">
                 <span className="text-[#00c885] font-bold">F2</span>
-                <span>Finalizar Venda e Emitir NFC-e (SEFAZ)</span>
+                <span>Finalizar venda</span>
               </div>
               <div className="flex justify-between py-1 border-b border-white/5">
                 <span className="text-[#00c885] font-bold">F3</span>

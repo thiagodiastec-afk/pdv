@@ -33,7 +33,7 @@ interface CheckoutModalProps {
     customerCpfCnpj: string;
     customerName: string;
     emitirNfce: boolean;
-  }) => void;
+  }) => Promise<void>;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -52,7 +52,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [customerCpfCnpj, setCustomerCpfCnpj] = useState<string>(initialCustomerCpf);
   const [customerName, setCustomerName] = useState<string>(initialCustomerName);
   const [discountInput, setDiscountInput] = useState<string>(discount > 0 ? discount.toFixed(2) : '');
-  const [emitirNfce, setEmitirNfce] = useState<boolean>(true);
+  const [emitirNfce, setEmitirNfce] = useState<boolean>(false);
   const [transmittingStep, setTransmittingStep] = useState<string | null>(null);
 
   useEffect(() => {
@@ -71,27 +71,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     onUpdateDiscount(clamped);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (transmittingStep) return;
+    if (transmittingStep || (paymentMethod === 'DINHEIRO' && effectiveTendered < total)) return;
 
-    if (emitirNfce) {
-      setTransmittingStep('Assinando XML com Certificado Digital ICP-Brasil A1...');
-      setTimeout(() => {
-        setTransmittingStep('Transmitindo Lote NFC-e para SEFAZ (Ambiente Produção)...');
-      }, 280);
-      setTimeout(() => {
-        onConfirmSale({
-          paymentMethod,
-          amountTendered: effectiveTendered,
-          changeAmount,
-          customerCpfCnpj: customerCpfCnpj.trim(),
-          customerName: customerName.trim(),
-          emitirNfce,
-        });
-      }, 620);
-    } else {
-      onConfirmSale({
+    setTransmittingStep('Salvando venda...');
+    try {
+      await onConfirmSale({
         paymentMethod,
         amountTendered: effectiveTendered,
         changeAmount,
@@ -99,6 +85,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         customerName: customerName.trim(),
         emitirNfce,
       });
+    } finally {
+      setTransmittingStep('');
     }
   };
 
@@ -159,10 +147,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <FileCheck2 className="w-5 h-5 text-[#00c885]" />
             <div>
               <h2 className="text-base font-bold text-white">
-                Finalizar Venda & Emitir Nota Fiscal (NFC-e)
+                Finalizar venda
               </h2>
               <p className="text-xs text-slate-400">
-                {items.reduce((acc, i) => acc + i.quantity, 0)} itens no cupom · Modelo 65 SEFAZ
+                {items.reduce((acc, i) => acc + i.quantity, 0)} itens no cupom
               </p>
             </div>
           </div>
@@ -304,7 +292,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   onChange={(e) => setEmitirNfce(e.target.checked)}
                   className="accent-[#00c885] rounded"
                 />
-                Transmitir XML SEFAZ
+                Gerar NFC-e simulada, sem valor fiscal
               </label>
             </div>
 
@@ -359,7 +347,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             disabled={Boolean(transmittingStep)}
             className="px-6 py-3 bg-[#00c885] hover:bg-[#00b377] disabled:opacity-60 text-slate-950 font-bold text-sm rounded-lg flex items-center gap-2 transition-colors shadow-lg cursor-pointer"
           >
-            <span>CONFIRMAR E EMITIR NFC-e — {formatBRL(total)}</span>
+            <span>CONFIRMAR VENDA — {formatBRL(total)}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>
