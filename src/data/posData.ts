@@ -54,7 +54,10 @@ export interface FiscalInvoice {
   tribEstadual: number;
 }
 
+export type SaleOperation = 'counter' | 'repair';
+
 export interface CashMovement {
+  operation?: SaleOperation;
   id: string;
   type: 'ABERTURA' | 'VENDA' | 'SANGRIA' | 'SUPRIMENTO' | 'ESTORNO';
   amount: number;

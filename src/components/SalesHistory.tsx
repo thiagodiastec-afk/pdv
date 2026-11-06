@@ -29,11 +29,13 @@ export function SalesHistory({ movements, invoices }: {
               {selected === sale.id && (
                 <div className="space-y-2 border-t border-white/10 p-3 text-sm">
                   <p>{sale.description}</p>
+                  {sale.operation && <p>{sale.operation === 'repair' ? 'Conserto ou assistência técnica' : 'Atendimento de balcão'}</p>}
                   {invoice?.status === 'CANCELADA' && <p className="text-amber-200">Venda estornada</p>}
                   {items ? (
                     <ul>{items.map(item => (
                       <li key={item.product.id} className="flex justify-between gap-2">
                         <span>{item.quantity} × {item.product.name}</span>
+                        <span className="text-slate-400">{item.product.kind === 'service' ? 'Serviço' : 'Mercadoria'}</span>
                         <span>{formatBRL(item.quantity * item.product.price)}</span>
                       </li>
                     ))}</ul>

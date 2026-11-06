@@ -21,6 +21,7 @@ import {
 interface CheckoutModalProps {
   items: CartItem[];
   allowFiscalSimulation: boolean;
+  allowRepair: boolean;
   subtotal: number;
   discount: number;
   initialCustomerCpf: string;
@@ -34,12 +35,14 @@ interface CheckoutModalProps {
     customerCpfCnpj: string;
     customerName: string;
     emitirNfce: boolean;
+    operation: 'counter' | 'repair';
   }) => Promise<void>;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   items,
   allowFiscalSimulation,
+  allowRepair,
   subtotal,
   discount,
   initialCustomerCpf,
@@ -54,6 +57,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [customerCpfCnpj, setCustomerCpfCnpj] = useState<string>(initialCustomerCpf);
   const [customerName, setCustomerName] = useState<string>(initialCustomerName);
   const [discountInput, setDiscountInput] = useState<string>(discount > 0 ? discount.toFixed(2) : '');
+  const [operation, setOperation] = useState<'counter' | 'repair'>('counter');
+  const canSimulate = allowFiscalSimulation && operation === 'counter';
   const [emitirNfce, setEmitirNfce] = useState<boolean>(false);
   const [transmittingStep, setTransmittingStep] = useState<string | null>(null);
 
@@ -85,7 +90,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         changeAmount,
         customerCpfCnpj: customerCpfCnpj.trim(),
         customerName: customerName.trim(),
-        emitirNfce: allowFiscalSimulation && emitirNfce,
+        emitirNfce: canSimulate && emitirNfce,
+        operation,
       });
     } finally {
       setTransmittingStep('');
@@ -290,12 +296,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={allowFiscalSimulation && emitirNfce}
-                  disabled={!allowFiscalSimulation}
+                  checked={canSimulate && emitirNfce}
+                  disabled={!canSimulate}
                   onChange={(e) => setEmitirNfce(e.target.checked)}
                   className="accent-[#00c885] rounded"
                 />
-                {allowFiscalSimulation ? 'Gerar NFC-e simulada, sem valor fiscal' : 'Venda com serviço sem simulação de NFC-e'}
+                {canSimulate ? 'Gerar NFC-e simulada, sem valor fiscal' : operation === 'repair' ? 'Conserto sem simulação de NFC-e' : 'Venda com serviço sem simulação de NFC-e'}
               </label>
             </div>
 
@@ -327,6 +333,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
           </div>
 
+          {allowRepair && (
+            <label className="block text-sm">
+              Tipo de atendimento
+              <select className="mt-1 block w-full rounded bg-[#141e22] p-2" value={operation}
+                onChange={event => setOperation(event.target.value === 'repair' ? 'repair' : 'counter')}>
+                <option value="counter">Balcão</option>
+                <option value="repair">Conserto ou assistência técnica</option>
+              </select>
+            </label>
+          )}
           {transmittingStep && (
             <div className="flex items-center gap-3 px-4 py-3 bg-[#00c885]/15 border border-[#00c885]/40 rounded-lg text-xs text-emerald-200 font-medium">
               <Loader2 className="w-4 h-4 text-[#00c885] animate-spin shrink-0" />

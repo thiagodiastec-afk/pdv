@@ -26,6 +26,7 @@ import {
   FiscalInvoice,
   CashMovement,
   PaymentMethod,
+  SaleOperation,
   INITIAL_PRODUCTS,
   INITIAL_CART,
   INITIAL_INVOICES,
@@ -42,14 +43,16 @@ import { CashMovementModal } from './components/CashMovementModal';
 import { InvoicesHistoryView } from './components/InvoicesHistoryView';
 import { CatalogFiscalView } from './components/CatalogFiscalView';
 import { FiscalConfigView } from './components/FiscalConfigView';
+import { ServiceFiscalSettings, type ServiceFiscalConfig } from './components/ServiceFiscalSettings';
 import { SalesHistory } from './components/SalesHistory';
 import { BusinessSetup, type Business } from './components/BusinessSetup';
 import { DesktopInstallerModal } from './components/DesktopInstallerModal';
 
-type ActiveWorkspace = 'POS' | 'SALES' | 'NFCE_HISTORY' | 'CATALOG' | 'CONFIG_FISCAL';
+type ActiveWorkspace = 'POS' | 'SALES' | 'NFCE_HISTORY' | 'CATALOG' | 'CONFIG_FISCAL' | 'CONFIG_SERVICES';
 
 type Snapshot = {
   business?: Business;
+  serviceFiscal?: ServiceFiscalConfig;
   registerOpen?: boolean;
   products: Product[];
   cart: CartItem[];
@@ -416,6 +419,7 @@ export default function App() {
     customerCpfCnpj: string;
     customerName: string;
     emitirNfce: boolean;
+    operation: SaleOperation;
   }) => {
     if (!isRegisterOpen || cart.length === 0) {
       triggerToast("Abra o caixa e adicione produtos para finalizar.");
@@ -448,7 +452,7 @@ export default function App() {
       0
     );
 
-    const newInvoice: FiscalInvoice | null = payload.emitirNfce && cart.every(item => item.product.kind !== 'service') ? {
+    const newInvoice: FiscalInvoice | null = payload.operation === 'counter' && payload.emitirNfce && cart.every(item => item.product.kind !== 'service') ? {
       id: `inv-${numeroNfce}-${Date.now()}`,
       numero: numeroNfce,
       serie: storeConfig.seriePadrao,
@@ -481,6 +485,7 @@ export default function App() {
       createdAt: formattedTimestamp,
       operatorName: 'Maurício',
       invoiceNumero: newInvoice?.numero,
+      operation: payload.operation,
       items: cart,
       discount: effectiveDiscount,
     };
@@ -683,14 +688,14 @@ export default function App() {
               Catálogo
             </button>
             <button
-              onClick={() => setWorkspace('CONFIG_FISCAL')}
+              onClick={() => setWorkspace(profile === 'services' ? 'CONFIG_SERVICES' : 'CONFIG_FISCAL')}
               className={`whitespace-nowrap shrink-0 py-1 transition-colors cursor-pointer ${
-                workspace === 'CONFIG_FISCAL'
+                (workspace === 'CONFIG_FISCAL' || workspace === 'CONFIG_SERVICES')
                   ? 'text-[#00c885] underline underline-offset-4 decoration-2'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              Config. Fiscal & Certificado
+              Configuração fiscal
             </button>
           </div>
         </nav>
@@ -783,8 +788,26 @@ export default function App() {
           }}
           onBackToPos={() => setWorkspace('POS')}
         />
+      ) : workspace === 'CONFIG_SERVICES' ? (
+        <section className="flex-1 overflow-auto p-5">
+          {profile === 'mixed' && (
+            <button type="button" className="mb-4 text-[#00c885]" onClick={() => setWorkspace('CONFIG_FISCAL')}>
+              Configuração de mercadorias · NF-e e NFC-e
+            </button>
+          )}
+          <ServiceFiscalSettings config={snapshot.serviceFiscal} onSave={setField('serviceFiscal')} />
+        </section>
       ) : workspace === 'CONFIG_FISCAL' ? (
-        <FiscalConfigView
+        <>
+          <div className="flex flex-wrap items-center gap-4 px-5 py-2 text-sm">
+            <span>Mercadorias · NFC-e em demonstração · NF-e modelo 55 pendente</span>
+            {profile === 'mixed' && (
+              <button type="button" className="text-[#00c885]" onClick={() => setWorkspace('CONFIG_SERVICES')}>
+                Configuração de serviços · NFS-e
+              </button>
+            )}
+          </div>
+          <FiscalConfigView
           store={storeConfig}
           invoices={invoices}
           onUpdateStore={(updated) => setStoreConfig(updated)}
@@ -800,6 +823,7 @@ export default function App() {
           }}
           onBackToPos={() => setWorkspace('POS')}
         />
+        </>
       ) : (
         /* Main POS Split Screen (Left Catalog + Right Cupom/Carrinho) */
         <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 overflow-hidden">
@@ -1117,6 +1141,7 @@ export default function App() {
       {showCheckoutModal && (
         <CheckoutModal
           items={cart}
+          allowRepair={profile !== 'retail'}
           allowFiscalSimulation={cart.every(item => item.product.kind !== 'service')}
           subtotal={subtotal}
           discount={effectiveDiscount}
