@@ -42,10 +42,11 @@ import { CashMovementModal } from './components/CashMovementModal';
 import { InvoicesHistoryView } from './components/InvoicesHistoryView';
 import { CatalogFiscalView } from './components/CatalogFiscalView';
 import { FiscalConfigView } from './components/FiscalConfigView';
+import { SalesHistory } from './components/SalesHistory';
 import { BusinessSetup, type Business } from './components/BusinessSetup';
 import { DesktopInstallerModal } from './components/DesktopInstallerModal';
 
-type ActiveWorkspace = 'POS' | 'NFCE_HISTORY' | 'CATALOG' | 'CONFIG_FISCAL';
+type ActiveWorkspace = 'POS' | 'SALES' | 'NFCE_HISTORY' | 'CATALOG' | 'CONFIG_FISCAL';
 
 type Snapshot = {
   business?: Business;
@@ -605,7 +606,7 @@ export default function App() {
             className="flex items-center gap-3 group cursor-pointer focus:outline-none"
             title={business?.name ?? "CromaPDV Fiscal"}
           >
-            <svg
+            {business?.logo ? <img src={business.logo} alt="" className="h-8 w-8 object-contain" /> : <svg
               viewBox="0 0 36 36"
               className="w-8 h-8 text-[#00c885] shrink-0 transition-transform group-hover:scale-105"
               fill="none"
@@ -615,7 +616,7 @@ export default function App() {
                 fill="currentColor"
               />
               <polygon points="21,15 29,11 29,25 21,21" fill="currentColor" opacity="0.85" />
-            </svg>
+            </svg>}
           </button>
 
           {/* Operator Profile Lockup */}
@@ -656,6 +657,10 @@ export default function App() {
               }`}
             >
               PDV / Caixa
+            </button>
+            <button onClick={() => setWorkspace('SALES')}
+              className={workspace === 'SALES' ? 'text-[#00c885]' : 'text-slate-400 hover:text-white'}>
+              Vendas
             </button>
             <button
               onClick={() => setWorkspace('NFCE_HISTORY')}
@@ -721,7 +726,9 @@ export default function App() {
       </header>
 
       {/* Main Content Area */}
-      {workspace === 'NFCE_HISTORY' ? (
+      {workspace === 'SALES' ? (
+        <SalesHistory movements={movements} invoices={invoices} />
+      ) : workspace === 'NFCE_HISTORY' ? (
         <InvoicesHistoryView
           invoices={invoices}
           store={storeConfig}
