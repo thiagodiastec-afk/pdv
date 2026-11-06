@@ -169,7 +169,7 @@ export default function App() {
 
   function setField<K extends keyof Snapshot>(key: K) {
     return (update: React.SetStateAction<Snapshot[K]>) => {
-      void saveSnapshot((current) => ({
+      return saveSnapshot((current) => ({
         ...current,
         [key]: typeof update === 'function'
           ? (update as (previous: Snapshot[K]) => Snapshot[K])(current[key])
@@ -186,9 +186,9 @@ export default function App() {
 
   const subtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
   const effectiveDiscount = Math.min(discount, subtotal);
-  const total = Math.max(0, subtotal - effectiveDiscount);
+  const total = Math.round(Math.max(0, subtotal - effectiveDiscount) * 100) / 100;
 
-  const addToCart = (product: Product, qty = 1) => {
+  const addToCart = async (product: Product, qty = 1) => {
     if (!isRegisterOpen) {
       triggerToast('Caixa fechado! Reabra o caixa (F7) para registrar vendas.');
       return;
@@ -198,7 +198,7 @@ export default function App() {
       triggerToast("Estoque insuficiente.");
       return;
     }
-    setCart((prev) => {
+    return await setCart((prev) => {
       const existingIndex = prev.findIndex((i) => i.product.id === product.id);
       if (existingIndex > -1) {
         const updated = [...prev];
@@ -293,7 +293,7 @@ export default function App() {
   }, [workspace, cart.length]);
 
   // Barcode / Quick Search Enter handler (supports "3*1001" or "7891000010013" or product name)
-  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleSearchKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && searchQuery.trim()) {
       e.preventDefault();
       const raw = searchQuery.trim();
@@ -325,7 +325,7 @@ export default function App() {
         );
 
       if (partialMatch) {
-        addToCart(partialMatch, qty);
+        if (!(await addToCart(partialMatch, qty))) return;
         setSearchQuery('');
         triggerToast(`+${qty}x ${partialMatch.name} adicionado ao cupom`);
       } else {
@@ -1014,7 +1014,7 @@ export default function App() {
 
       {/* Toast Feedback Banner */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 bg-[#141e22] border border-[#00c885] text-white px-4 py-2.5 rounded-lg shadow-xl text-xs font-medium">
+        <div className="fixed bottom-5 right-5 z-[60] bg-[#141e22] border border-[#00c885] text-white px-4 py-2.5 rounded-lg shadow-xl text-xs font-medium">
           {toastMessage}
         </div>
       )}

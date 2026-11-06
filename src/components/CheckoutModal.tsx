@@ -46,7 +46,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onClose,
   onConfirmSale,
 }) => {
-  const total = Math.max(0, subtotal - discount);
+  const total = Math.round(Math.max(0, subtotal - discount) * 100) / 100;
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('DINHEIRO');
   const [amountTenderedStr, setAmountTenderedStr] = useState<string>(total.toFixed(2));
   const [customerCpfCnpj, setCustomerCpfCnpj] = useState<string>(initialCustomerCpf);
@@ -56,12 +56,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [transmittingStep, setTransmittingStep] = useState<string | null>(null);
 
   useEffect(() => {
-    const newTotal = Math.max(0, subtotal - discount);
+    const newTotal = Math.round(Math.max(0, subtotal - discount) * 100) / 100;
     setAmountTenderedStr(newTotal.toFixed(2));
   }, [subtotal, discount]);
 
   const parsedTendered = parseFloat(amountTenderedStr.replace(',', '.')) || 0;
-  const effectiveTendered = paymentMethod === 'DINHEIRO' ? Math.max(parsedTendered, total) : total;
+  const effectiveTendered = paymentMethod === 'DINHEIRO' ? parsedTendered : total;
   const changeAmount = paymentMethod === 'DINHEIRO' ? Math.max(0, parsedTendered - total) : 0;
 
   const handleApplyDiscount = (valStr: string) => {
@@ -344,7 +344,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
           <button
             type="submit"
-            disabled={Boolean(transmittingStep)}
+            disabled={Boolean(transmittingStep) || (paymentMethod === 'DINHEIRO' && effectiveTendered < total)}
             className="px-6 py-3 bg-[#00c885] hover:bg-[#00b377] disabled:opacity-60 text-slate-950 font-bold text-sm rounded-lg flex items-center gap-2 transition-colors shadow-lg cursor-pointer"
           >
             <span>CONFIRMAR VENDA — {formatBRL(total)}</span>
