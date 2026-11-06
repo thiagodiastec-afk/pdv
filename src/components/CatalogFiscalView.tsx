@@ -204,7 +204,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col p-6 overflow-y-auto space-y-5 bg-[#141e22]">
+    <div className="min-h-0 flex-1 overflow-y-auto space-y-5 bg-[#141e22] p-6 pb-10">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
