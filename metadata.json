@@ -1,0 +1,6 @@
+{
+  "name": "CromaPDV Fiscal - Frente de Caixa e Emissão de NFC-e",
+  "description": "Sistema PDV de frente de caixa rápido com emissão de Nota Fiscal de Consumidor Eletrônica (NFC-e), controle de caixa, leitor de código de barras e impressão de DANFE.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
