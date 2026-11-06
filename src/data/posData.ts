@@ -2,6 +2,7 @@ export type CategoryId = 'Favoritos' | 'Bebidas' | 'Lanches' | 'Doces' | 'Outros
 
 export interface Product {
   kind?: 'service';
+  serviceCode?: string;
   id: string;
   code: string;
   barcode: string;

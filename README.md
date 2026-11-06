@@ -54,3 +54,9 @@ Ao finalizar um atendimento nos perfis Serviços ou Operação mista, escolha **
 - Homologação. Validar cada fluxo com um emitente habilitado. Usar armazenamento seguro para credenciais e habilitar produção somente após os testes.
 
 Referências oficiais: [NFC-e em São Paulo](https://portal.fazenda.sp.gov.br/servicos/nfce/), [Portaria CAT 56/2021](https://legislacao.fazenda.sp.gov.br/Paginas/Portaria-CAT-56-de-2021.aspx) e [documentação nacional da NFS-e](https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/documentacao-atual).
+
+## Preencher o catálogo a partir de fontes existentes
+
+- Produtos. Em **Catálogo → Cadastrar item**, carregue o XML de uma NF-e do fornecedor. Se houver vários itens, escolha um deles ou digite o GTIN presente no arquivo. O PDV copia descrição, GTIN, NCM, CEST e a unidade quando suportada. Revise os dados e preencha preço de venda e estoque. O CFOP do fornecedor não é copiado.
+- Serviços. Selecione **Serviço** e busque pelo nome ou código na lista nacional. O código escolhido e a descrição sugerida podem ser alterados. A referência incluída no aplicativo é a [lista publicada pelo Portal Nacional da NFS-e](https://www.gov.br/nfse/pt-br/mei-e-demais-empresas/codigos-de-tributacao-nacional-nbs), consultada em 6 de novembro de 2026.
+- Para ajustar depois, abra o item em **Editar**. Sem XML, o produto pode ser cadastrado manualmente. A consulta a uma base externa por GTIN depende de uma integração futura.

@@ -1,3 +1,5 @@
+import serviceCodes from '../data/serviceCodes.json';
+import { readSupplierProducts, type SupplierProduct } from '../data/supplierProducts';
 import type { BusinessProfile } from './BusinessSetup';
 import React, { useState } from 'react';
 import {
@@ -40,6 +42,10 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // Form fields
+  const [supplierProducts, setSupplierProducts] = useState<SupplierProduct[]>([]);
+  const [importMessage, setImportMessage] = useState('');
+  const [serviceQuery, setServiceQuery] = useState('');
+  const [serviceCode, setServiceCode] = useState('');
   const [isService, setIsService] = useState(profile === 'services');
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
@@ -47,8 +53,8 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
   const [stockStr, setStockStr] = useState('50');
   const [unit, setUnit] = useState<'UN' | 'KG' | 'LT'>('UN');
   const [category, setCategory] = useState<Exclude<CategoryId, 'Favoritos'>>('Bebidas');
-  const [barcode, setBarcode] = useState('7891000010990');
-  const [ncm, setNcm] = useState('19059090');
+  const [barcode, setBarcode] = useState('');
+  const [ncm, setNcm] = useState('');
   const [cest, setCest] = useState('');
   const [cfop, setCfop] = useState<'5102' | '5405'>('5102');
   const [csosn, setCsosn] = useState<'102' | '500'>('102');
@@ -73,11 +79,14 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
     setCode(String(1000 + products.length + 1));
     setName('');
     setPriceStr('');
-    setStockStr('50');
+    setStockStr('0');
     setUnit('UN');
     setCategory('Bebidas');
-    setBarcode(`7891000010${String(products.length + 12).padStart(3, '0')}`);
-    setNcm('19059090');
+    setBarcode('');
+    setNcm('');
+    setServiceCode('');
+    setServiceQuery('');
+    setImportMessage('');
     setCest('');
     setCfop('5102');
     setCsosn('102');
@@ -88,6 +97,9 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
 
   const openEditProductForm = (prod: Product) => {
     setEditingId(prod.id);
+    setServiceCode(prod.serviceCode ?? '');
+    setServiceQuery('');
+    setImportMessage('');
     setIsService(prod.kind === 'service');
     setCode(prod.code);
     setName(prod.name);
@@ -105,6 +117,21 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
     setShowForm(true);
   };
 
+  function applySupplierProduct(product: SupplierProduct) {
+    setName(product.name);
+    setBarcode(product.barcode);
+    setNcm(product.ncm);
+    setCest(product.cest);
+    if (product.unit === 'UN' || product.unit === 'KG' || product.unit === 'LT') setUnit(product.unit);
+    setImportMessage('Dados copiados do XML. Confira a classificação, o preço de venda e o estoque.');
+  }
+
+  const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const serviceTerms = normalize(serviceQuery.trim()).split(/\s+/).filter(Boolean);
+  const serviceMatches = serviceTerms.length ? Object.entries(serviceCodes)
+    .filter(([key, description]) => serviceTerms.every(term => normalize(key + ' ' + description).includes(term)))
+    .slice(0, 12) : [];
+
   const handleSaveForm = (e: React.FormEvent) => {
     e.preventDefault();
     const price = parseFloat(priceStr.replace(',', '.')) || 0;
@@ -113,6 +140,10 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
     const ibptStatePct = parseFloat(ibptEstStr.replace(',', '.')) || 12.0;
 
     if (!name.trim() || !Number.isFinite(price) || price <= 0) return;
+    if (!isService && barcode.trim() && products.some(p => p.id !== editingId && p.barcode === barcode.trim())) {
+      setImportMessage('Este código de barras já está cadastrado.');
+      return;
+    }
 
     const categoryDefaultImage: Record<Exclude<CategoryId, 'Favoritos'>, string> = {
       Bebidas: '/assets/products/cafe_expresso.png',
@@ -127,14 +158,15 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
       const updatedProd: Product = {
         ...existing,
         code: code.trim() || existing.code,
-        barcode: isService ? '' : barcode.trim() || existing.barcode,
+        barcode: isService ? '' : barcode.trim(),
         name: name.trim(),
         price,
         kind: isService ? 'service' : undefined,
+        serviceCode: isService ? serviceCode || undefined : undefined,
         stock,
         unit,
         category,
-        ncm: ncm.replace(/\D/g, '').slice(0, 8).padEnd(8, '0'),
+        ncm: ncm.replace(/\D/g, '').slice(0, 8),
         cest: cest.replace(/\D/g, '') || undefined,
         cfop,
         csosn,
@@ -146,16 +178,17 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
       const newProd: Product = {
         id: `prod-${Date.now()}`,
         code: code.trim() || String(1000 + products.length + 1),
-        barcode: isService ? '' : barcode.trim() || `7891000010${products.length + 15}`,
+        barcode: isService ? '' : barcode.trim(),
         name: name.trim(),
         price,
         kind: isService ? 'service' : undefined,
+        serviceCode: isService ? serviceCode || undefined : undefined,
         category,
         isFavorite: true,
         featuredInMainGrid: true,
         image: categoryDefaultImage[category],
         unit,
-        ncm: ncm.replace(/\D/g, '').slice(0, 8).padEnd(8, '0'),
+        ncm: ncm.replace(/\D/g, '').slice(0, 8),
         cest: cest.replace(/\D/g, '') || undefined,
         cfop,
         csosn,
@@ -254,6 +287,70 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
             </button>
           </div>
 
+          {!isService && (
+            <div className="space-y-2 rounded border border-white/15 p-3 text-sm">
+              <label className="block">Preencher com XML do fornecedor
+                <input type="file" accept=".xml,text/xml,application/xml" className="mt-1 block"
+                  onChange={async event => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (!file) return;
+                    setSupplierProducts([]);
+                    try {
+                      if (file.size > 5 * 1024 * 1024) throw new Error('Selecione um XML de até 5 MB.');
+                      const entries = readSupplierProducts(await file.text());
+                      setSupplierProducts(entries);
+                      if (entries.length === 1) applySupplierProduct(entries[0]);
+                      else setImportMessage(entries.length ? 'Selecione o item da nota ou digite o código de barras.' : 'Nenhum produto de NF-e encontrado no XML.');
+                    } catch (error) {
+                      setImportMessage(error instanceof Error ? error.message : 'Não foi possível ler o XML.');
+                    }
+                  }} />
+              </label>
+              {supplierProducts.length > 1 && (
+                <label className="block">Item do XML
+                  <select defaultValue="" className="ml-2 max-w-full rounded bg-[#141e22] p-2"
+                    onChange={event => {
+                      if (event.target.value) applySupplierProduct(supplierProducts[Number(event.target.value)]);
+                    }}>
+                    <option value="">Selecione</option>
+                    {supplierProducts.map((product, index) => <option key={index} value={index}>{product.name}</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
+          )}
+          {importMessage && <p role="status" className="text-sm text-amber-200">{importMessage}</p>}
+          {isService && (
+            <div className="space-y-2 rounded border border-white/15 p-3 text-sm">
+              <label className="block">Buscar na lista oficial de serviços
+                <input value={serviceQuery} onChange={event => setServiceQuery(event.target.value)}
+                  placeholder="Ex.: conserto, manutenção ou 140101" className="mt-1 block w-full rounded bg-[#141e22] p-2" />
+              </label>
+              {serviceMatches.length > 0 && (
+                <label className="block">Resultado da busca
+                  <select value="" className="mt-1 block w-full rounded bg-[#141e22] p-2"
+                    onChange={event => {
+                      const code = event.target.value as keyof typeof serviceCodes;
+                      if (!code) return;
+                      setServiceCode(code);
+                      if (!name.trim()) setName(serviceCodes[code]);
+                      setServiceQuery('');
+                    }}>
+                    <option value="">Escolha uma sugestão</option>
+                    {serviceMatches.map(([key, description]) => <option key={key} value={key}>{key} · {description}</option>)}
+                  </select>
+                </label>
+              )}
+              {serviceTerms.length > 0 && serviceMatches.length === 0 && <p>Nenhum serviço encontrado.</p>}
+              <label>Código nacional do serviço
+                <input value={serviceCode} inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
+                  onChange={event => setServiceCode(event.target.value.replace(/\D/g, ''))}
+                  className="ml-2 rounded bg-[#141e22] p-2" />
+              </label>
+              <p className="text-slate-300">Confirme a classificação conforme o município do prestador.</p>
+            </div>
+          )}
           {profile === 'mixed' && !editingId && (
             <label className="block text-sm">
               Tipo do item
@@ -355,7 +452,12 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                 type="text"
                 maxLength={14}
                 value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
+                onChange={event => {
+                  const value = event.target.value;
+                  setBarcode(value);
+                  const matches = supplierProducts.filter(product => product.barcode && product.barcode === value.trim());
+                  if (matches.length === 1) applySupplierProduct(matches[0]);
+                }}
                 className="w-full px-3 py-2 bg-[#141e22] border border-white/15 rounded-lg text-xs text-white font-mono tabular-nums focus:outline-none focus:border-[#00c885]"
               />
             </div>
@@ -365,7 +467,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
               <input
                 type="text"
                 maxLength={8}
-                required
+                pattern="[0-9]{8}"
                 value={ncm}
                 onChange={(e) => setNcm(e.target.value)}
                 className="w-full px-3 py-2 bg-[#141e22] border border-white/15 rounded-lg text-xs text-white font-mono tabular-nums focus:outline-none focus:border-[#00c885]"
