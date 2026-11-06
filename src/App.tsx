@@ -104,6 +104,10 @@ export default function App() {
   const [showDiscountModal, setShowDiscountModal] = useState<boolean>(false);
   const [showCpfModal, setShowCpfModal] = useState<boolean>(false);
   const [showCancelConfirmModal, setShowCancelConfirmModal] = useState<boolean>(false);
+  const showInstallOptions =
+    window.location.protocol !== 'file:' &&
+    !window.matchMedia('(display-mode: standalone)').matches &&
+    (navigator as Navigator & { standalone?: boolean }).standalone !== true;
   const [showInstallerModal, setShowInstallerModal] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -274,7 +278,7 @@ export default function App() {
         if (cart.length > 0) {
           setShowCancelConfirmModal(true);
         }
-      } else if (e.key === 'F9') {
+      } else if (e.key === 'F9' && showInstallOptions) {
         e.preventDefault();
         setShowInstallerModal(true);
       } else if (e.key === 'Escape') {
@@ -290,7 +294,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [workspace, cart.length]);
+  }, [workspace, cart.length, showInstallOptions]);
 
   // Barcode / Quick Search Enter handler (supports "3*1001" or "7891000010013" or product name)
   const handleSearchKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -626,15 +630,17 @@ export default function App() {
 
         {/* Zone 3: Primary Desktop Installer Action + Date/Time Telemetry */}
         <div className="flex items-center gap-4 shrink-0">
-          <button
-            type="button"
-            onClick={() => setShowInstallerModal(true)}
-            className="px-3.5 py-1.5 bg-[#00c885] hover:bg-[#00b377] text-slate-950 font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 shadow-sm cursor-pointer"
-            title="Baixar Instalador para Computador (F9)"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Instalar no PC</span>
-          </button>
+          {showInstallOptions && (
+            <button
+              type="button"
+              onClick={() => setShowInstallerModal(true)}
+              className="px-3.5 py-1.5 bg-[#00c885] hover:bg-[#00b377] text-slate-950 font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 shadow-sm cursor-pointer"
+              title="Baixar Instalador para Computador (F9)"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Instalar no PC</span>
+            </button>
+          )}
           <div className="flex items-center gap-2.5">
             <div className="text-right font-mono tabular-nums leading-tight">
               <div className="text-xs text-slate-200 font-medium">{clockText.date}</div>
@@ -865,13 +871,15 @@ export default function App() {
               >
                 F8: Cancelar
               </button>
-              <button
-                type="button"
-                onClick={() => setShowInstallerModal(true)}
-                className="px-3 py-1.5 bg-[#202d33] hover:bg-[#2a3a42] border border-[#00c885]/40 rounded text-xs text-[#00c885] font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                F9: Instalador PC
-              </button>
+              {showInstallOptions && (
+                <button
+                  type="button"
+                  onClick={() => setShowInstallerModal(true)}
+                  className="px-3 py-1.5 bg-[#202d33] hover:bg-[#2a3a42] border border-[#00c885]/40 rounded text-xs text-[#00c885] font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  F9: Instalador PC
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setShowCpfModal(true)}
@@ -1288,7 +1296,7 @@ export default function App() {
       )}
 
       {/* Desktop & PWA Installer Modal (F9) */}
-      {showInstallerModal && (
+      {showInstallOptions && showInstallerModal && (
         <DesktopInstallerModal onClose={() => setShowInstallerModal(false)} />
       )}
     </div>
