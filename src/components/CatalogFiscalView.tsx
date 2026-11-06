@@ -1,3 +1,4 @@
+import type { BusinessProfile } from './BusinessSetup';
 import React, { useState } from 'react';
 import {
   Plus,
@@ -14,6 +15,7 @@ import { Product, CategoryId, formatBRL } from '../data/posData';
 
 interface CatalogFiscalViewProps {
   products: Product[];
+  profile: BusinessProfile;
   onAddProduct: (prod: Product) => void;
   onUpdateProduct: (prod: Product) => void;
   onDeleteProduct: (id: string) => void;
@@ -23,6 +25,7 @@ interface CatalogFiscalViewProps {
 
 export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
   products,
+  profile,
   onAddProduct,
   onUpdateProduct,
   onDeleteProduct,
@@ -37,6 +40,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // Form fields
+  const [isService, setIsService] = useState(profile === 'services');
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [priceStr, setPriceStr] = useState('');
@@ -65,6 +69,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
 
   const openNewProductForm = () => {
     setEditingId(null);
+    setIsService(profile === 'services');
     setCode(String(1000 + products.length + 1));
     setName('');
     setPriceStr('');
@@ -83,6 +88,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
 
   const openEditProductForm = (prod: Product) => {
     setEditingId(prod.id);
+    setIsService(prod.kind === 'service');
     setCode(prod.code);
     setName(prod.name);
     setPriceStr(prod.price.toFixed(2));
@@ -102,11 +108,11 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
   const handleSaveForm = (e: React.FormEvent) => {
     e.preventDefault();
     const price = parseFloat(priceStr.replace(',', '.')) || 0;
-    const stock = parseInt(stockStr, 10) || 0;
+    const stock = isService ? 0 : Math.max(0, parseInt(stockStr, 10) || 0);
     const ibptFederalPct = parseFloat(ibptFedStr.replace(',', '.')) || 4.2;
     const ibptStatePct = parseFloat(ibptEstStr.replace(',', '.')) || 12.0;
 
-    if (!name.trim() || price <= 0) return;
+    if (!name.trim() || !Number.isFinite(price) || price <= 0) return;
 
     const categoryDefaultImage: Record<Exclude<CategoryId, 'Favoritos'>, string> = {
       Bebidas: '/assets/products/cafe_expresso.png',
@@ -121,9 +127,10 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
       const updatedProd: Product = {
         ...existing,
         code: code.trim() || existing.code,
-        barcode: barcode.trim() || existing.barcode,
+        barcode: isService ? '' : barcode.trim() || existing.barcode,
         name: name.trim(),
         price,
+        kind: isService ? 'service' : undefined,
         stock,
         unit,
         category,
@@ -139,9 +146,10 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
       const newProd: Product = {
         id: `prod-${Date.now()}`,
         code: code.trim() || String(1000 + products.length + 1),
-        barcode: barcode.trim() || `7891000010${products.length + 15}`,
+        barcode: isService ? '' : barcode.trim() || `7891000010${products.length + 15}`,
         name: name.trim(),
         price,
+        kind: isService ? 'service' : undefined,
         category,
         isFavorite: true,
         featuredInMainGrid: true,
@@ -168,7 +176,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-lg font-bold text-white">
-            Catálogo de Produtos, Estoque & Tributação Fiscal (NCM / CFOP / ICMS)
+            Catálogo de produtos e serviços
           </h1>
           <p className="text-xs text-slate-400">
             Cadastro completo de itens com EAN-13, NCM, CFOP (5102 / 5405), CSOSN, alíquotas IBPT e controle de estoque
@@ -181,7 +189,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
             className="px-4 py-2 bg-[#25333a] hover:bg-[#31434c] text-white font-semibold text-xs rounded-lg border border-white/10 flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4 text-[#00c885]" />
-            Cadastrar Produto Fiscal
+            Cadastrar item
           </button>
 
           <button
@@ -234,7 +242,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
               <span className="text-xs font-bold text-[#00c885] uppercase tracking-wider">
                 {editingId
                   ? `Editando Produto Fiscal #${code} — ${name}`
-                  : 'Novo Cadastro de Produto & Regras Fiscais NFC-e'}
+                  : 'Novo item do catálogo'}
               </span>
             </div>
             <button
@@ -246,6 +254,16 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
             </button>
           </div>
 
+          {profile === 'mixed' && !editingId && (
+            <label className="block text-sm">
+              Tipo do item
+              <select className="ml-2 rounded bg-[#141e22] p-2" value={isService ? 'service' : 'product'}
+                onChange={event => setIsService(event.target.value === 'service')}>
+                <option value="product">Produto</option>
+                <option value="service">Serviço</option>
+              </select>
+            </label>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-6 gap-3">
             <div>
               <label className="block text-[11px] text-slate-400 mb-1">Cód. Interno</label>
@@ -260,12 +278,12 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
 
             <div className="sm:col-span-2">
               <label className="block text-[11px] text-slate-400 mb-1">
-                Descrição Fiscal do Produto (xProd)
+                {isService ? 'Descrição do serviço' : 'Descrição do produto'}
               </label>
               <input
                 type="text"
                 required
-                placeholder="Ex: Café Expresso Duplo"
+                placeholder="Nome do item"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full px-3 py-2 bg-[#141e22] border border-white/15 rounded-lg text-xs text-white focus:outline-none focus:border-[#00c885]"
@@ -280,18 +298,21 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                 min="0.01"
                 required
                 placeholder="0,00"
+                aria-label="Preço unitário"
                 value={priceStr}
                 onChange={(e) => setPriceStr(e.target.value)}
                 className="w-full px-3 py-2 bg-[#141e22] border border-white/15 rounded-lg text-xs text-white font-mono tabular-nums focus:outline-none focus:border-[#00c885]"
               />
             </div>
 
+            {!isService && <>
             <div>
               <label className="block text-[11px] text-slate-400 mb-1">Estoque Atual</label>
               <input
                 type="number"
                 min="0"
                 required
+                aria-label="Estoque atual"
                 value={stockStr}
                 onChange={(e) => setStockStr(e.target.value)}
                 className="w-full px-3 py-2 bg-[#141e22] border border-white/15 rounded-lg text-xs text-white font-mono tabular-nums focus:outline-none focus:border-[#00c885]"
@@ -322,9 +343,10 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                 </select>
               </div>
             </div>
+            </>}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-6 gap-3 pt-1">
+          {!isService && <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-6 gap-3 pt-1">
             <div>
               <label className="block text-[11px] text-slate-400 mb-1">
                 Código EAN-13 / GTIN
@@ -405,7 +427,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                 />
               </div>
             </div>
-          </div>
+          </div>}
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
             <button
@@ -423,7 +445,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
               className="px-5 py-2 bg-[#00c885] hover:bg-[#00b377] text-slate-950 font-bold text-xs rounded-lg flex items-center gap-1.5 cursor-pointer"
             >
               <Check className="w-4 h-4" />
-              {editingId ? 'Salvar Alterações no Produto' : 'Concluir Cadastro Fiscal'}
+              {editingId ? 'Salvar alterações' : 'Salvar item'}
             </button>
           </div>
         </form>
@@ -501,7 +523,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                     CFOP {prod.cfop} · CSOSN {prod.csosn}
                   </td>
                   <td className="py-2.5 px-4 text-right font-mono text-slate-300">
-                    {prod.stock} {prod.unit}
+                    {prod.kind === 'service' ? 'Serviço' : `${prod.stock} ${prod.unit}`}
                   </td>
                   <td className="py-2.5 px-4 text-right font-mono font-bold text-white">
                     {formatBRL(prod.price)}

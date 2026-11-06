@@ -15,6 +15,12 @@ npx --yes bun run preview --host 127.0.0.1 --port 4173 --strictPort
 
 Abra http://127.0.0.1:4173 no navegador. O PDV guarda dados por endereço do navegador. Use uma janela InPrivate para testar com dados isolados.
 
+## Configurar o negócio
+
+Na primeira abertura, informe o nome comercial e selecione Comércio, Serviços ou Operação mista. Escolha os dados de demonstração apenas para testar. Uma instalação nova sem demonstração começa com catálogo e caixa vazios.
+
+Cadastre os itens em **Catálogo** e abra o caixa em **F7**. No perfil misto, selecione Produto ou Serviço ao cadastrar cada item. Produtos baixam estoque. Serviços podem ser cobrados na mesma venda e ficam fora da simulação de NFC-e. Use **Meu negócio** no topo para editar o perfil. O catálogo existente é preservado ao trocar de perfil.
+
 ## Testes automatizados
 
 Com a prévia aberta, rode em outro terminal:

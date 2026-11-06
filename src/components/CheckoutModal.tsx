@@ -20,6 +20,7 @@ import {
 
 interface CheckoutModalProps {
   items: CartItem[];
+  allowFiscalSimulation: boolean;
   subtotal: number;
   discount: number;
   initialCustomerCpf: string;
@@ -38,6 +39,7 @@ interface CheckoutModalProps {
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   items,
+  allowFiscalSimulation,
   subtotal,
   discount,
   initialCustomerCpf,
@@ -83,7 +85,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         changeAmount,
         customerCpfCnpj: customerCpfCnpj.trim(),
         customerName: customerName.trim(),
-        emitirNfce,
+        emitirNfce: allowFiscalSimulation && emitirNfce,
       });
     } finally {
       setTransmittingStep('');
@@ -288,11 +290,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={emitirNfce}
+                  checked={allowFiscalSimulation && emitirNfce}
+                  disabled={!allowFiscalSimulation}
                   onChange={(e) => setEmitirNfce(e.target.checked)}
                   className="accent-[#00c885] rounded"
                 />
-                Gerar NFC-e simulada, sem valor fiscal
+                {allowFiscalSimulation ? 'Gerar NFC-e simulada, sem valor fiscal' : 'Venda com serviço sem simulação de NFC-e'}
               </label>
             </div>
 

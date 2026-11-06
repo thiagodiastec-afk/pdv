@@ -1,6 +1,7 @@
 export type CategoryId = 'Favoritos' | 'Bebidas' | 'Lanches' | 'Doces' | 'Outros';
 
 export interface Product {
+  kind?: 'service';
   id: string;
   code: string;
   barcode: string;
@@ -62,6 +63,8 @@ export interface CashMovement {
   createdAt: string;
   operatorName: string;
   invoiceNumero?: number;
+  items?: CartItem[];
+  discount?: number;
 }
 
 export interface StoreFiscalConfig {

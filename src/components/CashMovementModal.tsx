@@ -38,7 +38,9 @@ export const CashMovementModal: React.FC<CashMovementModalProps> = ({
     .reduce((acc, m) => acc + m.amount, 0);
 
   const saldoGavetaDinheiro =
-    totalAbertura + totalVendasDinheiro + totalSuprimentos - totalSangrias;
+    totalAbertura + totalVendasDinheiro + totalSuprimentos - totalSangrias -
+    movements.filter(m => m.type === 'ESTORNO' && m.paymentMethod === 'DINHEIRO')
+      .reduce((total, movement) => total + movement.amount, 0);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

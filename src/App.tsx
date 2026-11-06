@@ -42,11 +42,14 @@ import { CashMovementModal } from './components/CashMovementModal';
 import { InvoicesHistoryView } from './components/InvoicesHistoryView';
 import { CatalogFiscalView } from './components/CatalogFiscalView';
 import { FiscalConfigView } from './components/FiscalConfigView';
+import { BusinessSetup, type Business } from './components/BusinessSetup';
 import { DesktopInstallerModal } from './components/DesktopInstallerModal';
 
 type ActiveWorkspace = 'POS' | 'NFCE_HISTORY' | 'CATALOG' | 'CONFIG_FISCAL';
 
 type Snapshot = {
+  business?: Business;
+  registerOpen?: boolean;
   products: Product[];
   cart: CartItem[];
   invoices: FiscalInvoice[];
@@ -85,7 +88,12 @@ function readSnapshot(): Snapshot & { saved: string | null } {
 export default function App() {
   const [snapshot, setSnapshot] = useState(readSnapshot);
   const snapshotRef = useRef(snapshot);
-  const { products, invoices, movements, storeConfig, cart } = snapshot;
+  const { products, invoices, movements, storeConfig, cart, business } = snapshot;
+  const [showBusinessSetup, setShowBusinessSetup] = useState(false);
+  const profile = business?.profile ?? 'mixed';
+  const availableProducts = products.filter(product =>
+    profile === 'mixed' || (profile === 'services' ? product.kind === 'service' : product.kind !== 'service')
+  );
 
   const [workspace, setWorkspace] = useState<ActiveWorkspace>('POS');
   const [selectedCategory, setSelectedCategory] = useState<CategoryId>('Bebidas');
@@ -94,7 +102,7 @@ export default function App() {
   const [discount, setDiscount] = useState<number>(0);
   const [customerCpf, setCustomerCpf] = useState<string>('');
   const [customerName, setCustomerName] = useState<string>('');
-  const [isRegisterOpen, setIsRegisterOpen] = useState<boolean>(true);
+  const isRegisterOpen = snapshot.registerOpen ?? true;
 
   // Modals state
   const [showCheckoutModal, setShowCheckoutModal] = useState<boolean>(false);
@@ -188,6 +196,55 @@ export default function App() {
   const setMovements = setField('movements');
   const setStoreConfig = setField('storeConfig');
 
+  async function saveBusiness(nextBusiness: Business, demo: boolean) {
+    if ((business || snapshot.saved !== null) && cart.some(({ product }) =>
+      (nextBusiness.profile === 'retail' && product.kind === 'service') ||
+      (nextBusiness.profile === 'services' && product.kind !== 'service')
+    )) {
+      triggerToast('Esvazie o carrinho antes de mudar para este perfil.');
+      return false;
+    }
+    const saved = await saveSnapshot(current => {
+      const hasExistingData = snapshot.saved !== null ||
+        ['products_v1', 'cart_v1', 'invoices_v1', 'movements_v1', 'store_config_v2']
+          .some(key => localStorage.getItem('cromapdv_' + key) !== null);
+      if (hasExistingData || demo) return {
+        ...current,
+        business: nextBusiness,
+        cart: !hasExistingData && nextBusiness.profile === 'services' ? [] : current.cart,
+      };
+      return {
+        ...current,
+        business: nextBusiness,
+        registerOpen: false,
+        products: [],
+        cart: [],
+        invoices: [],
+        movements: [],
+        storeConfig: {
+          ...current.storeConfig,
+          nomeFantasia: nextBusiness.name,
+          razaoSocial: nextBusiness.name,
+          cnpj: '',
+          inscricaoEstadual: '',
+          endereco: '',
+          cidadeUf: '',
+          cep: '',
+          codigoIbgeMunicipio: '',
+          cscId: '',
+          cscToken: '',
+          certificadoArquivoNome: '',
+          certificadoEmissor: '',
+          certificadoValidade: '',
+          certificadoStatus: 'PENDENTE',
+          proximoNumeroNfce: 1,
+        },
+      };
+    });
+    if (saved) setShowBusinessSetup(false);
+    return saved;
+  }
+
   const subtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
   const effectiveDiscount = Math.min(discount, subtotal);
   const total = Math.round(Math.max(0, subtotal - effectiveDiscount) * 100) / 100;
@@ -198,7 +255,7 @@ export default function App() {
       return;
     }
     const available = products.find((item) => item.id === product.id)?.stock ?? 0;
-    if ((cart.find((item) => item.product.id === product.id)?.quantity ?? 0) + qty > available) {
+    if ((cart.find((item) => item.product.id === product.id)?.quantity ?? 0) + qty > available && product.kind !== 'service') {
       triggerToast("Estoque insuficiente.");
       return;
     }
@@ -219,7 +276,7 @@ export default function App() {
   const updateCartQuantity = (productId: string, delta: number) => {
     const item = cart.find((entry) => entry.product.id === productId);
     const available = products.find((product) => product.id === productId)?.stock ?? 0;
-    if (delta > 0 && item && item.quantity + delta > available) {
+    if (delta > 0 && item && item.product.kind !== 'service' && item.quantity + delta > available) {
       triggerToast("Estoque insuficiente.");
       return;
     }
@@ -250,12 +307,13 @@ export default function App() {
   // Global POS keyboard shortcuts (F1, F2, F3, F4, F6, F7, F8, Escape)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!business || showBusinessSetup) return;
       if (e.key === 'F1') {
         e.preventDefault();
         setShowHelpModal((v) => !v);
       } else if (e.key === 'F2') {
         e.preventDefault();
-        if (workspace === 'POS' && cart.length > 0) {
+        if (business && !showBusinessSetup && workspace === 'POS' && cart.length > 0) {
           setShowCheckoutModal(true);
         }
       } else if (e.key === 'F3') {
@@ -294,7 +352,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [workspace, cart.length, showInstallOptions]);
+  }, [workspace, cart.length, showInstallOptions, business, showBusinessSetup]);
 
   // Barcode / Quick Search Enter handler (supports "3*1001" or "7891000010013" or product name)
   const handleSearchKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -313,7 +371,7 @@ export default function App() {
         }
       }
 
-      const exactMatch = products.find(
+      const exactMatch = availableProducts.find(
         (p) =>
           p.barcode === term ||
           p.code === term ||
@@ -322,7 +380,7 @@ export default function App() {
 
       const partialMatch =
         exactMatch ||
-        products.find(
+        availableProducts.find(
           (p) =>
             p.name.toLowerCase().includes(term.toLowerCase()) ||
             p.barcode.includes(term)
@@ -340,7 +398,8 @@ export default function App() {
 
   // Simulate barcode reader beep
   const handleSimulateBarcodeScan = () => {
-    const sample = products[Math.floor(Math.random() * products.length)];
+    const scannable = availableProducts.filter(product => product.kind !== 'service');
+    const sample = scannable[Math.floor(Math.random() * scannable.length)];
     if (!sample) {
       triggerToast("Cadastre um produto para simular a leitura.");
       return;
@@ -362,7 +421,7 @@ export default function App() {
       return;
     }
     const unavailable = cart.find(({ product, quantity }) =>
-      quantity > (products.find((entry) => entry.id === product.id)?.stock ?? 0)
+      product.kind !== 'service' && quantity > (products.find((entry) => entry.id === product.id)?.stock ?? 0)
     );
     if (unavailable) {
       triggerToast(`Estoque insuficiente: ${unavailable.product.name}.`);
@@ -388,7 +447,7 @@ export default function App() {
       0
     );
 
-    const newInvoice: FiscalInvoice | null = payload.emitirNfce ? {
+    const newInvoice: FiscalInvoice | null = payload.emitirNfce && cart.every(item => item.product.kind !== 'service') ? {
       id: `inv-${numeroNfce}-${Date.now()}`,
       numero: numeroNfce,
       serie: storeConfig.seriePadrao,
@@ -421,6 +480,8 @@ export default function App() {
       createdAt: formattedTimestamp,
       operatorName: 'Maurício',
       invoiceNumero: newInvoice?.numero,
+      items: cart,
+      discount: effectiveDiscount,
     };
 
     const saved = await saveSnapshot((current) => {
@@ -434,7 +495,7 @@ export default function App() {
           : storeConfig,
         products: products.map((product) => {
           const soldItem = cart.find((item) => item.product.id === product.id);
-          return soldItem ? { ...product, stock: product.stock - soldItem.quantity } : product;
+          return soldItem && product.kind !== 'service' ? { ...product, stock: product.stock - soldItem.quantity } : product;
         }),
         cart: [],
       };
@@ -510,7 +571,8 @@ export default function App() {
   };
 
   // Filter products for the POS grid
-  const displayedProducts = products.filter((prod) => {
+  const displayedProducts = availableProducts.filter((prod) => {
+    if (prod.kind === 'service' && !searchQuery.trim()) return selectedCategory === 'Bebidas' || selectedCategory === 'Outros';
     const q = searchQuery.toLowerCase().trim();
     if (q) {
       return (
@@ -541,7 +603,7 @@ export default function App() {
           <button
             onClick={() => setWorkspace('POS')}
             className="flex items-center gap-3 group cursor-pointer focus:outline-none"
-            title="CromaPDV Fiscal"
+            title={business?.name ?? "CromaPDV Fiscal"}
           >
             <svg
               viewBox="0 0 36 36"
@@ -613,7 +675,7 @@ export default function App() {
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              Catálogo & NCM
+              Catálogo
             </button>
             <button
               onClick={() => setWorkspace('CONFIG_FISCAL')}
@@ -627,6 +689,13 @@ export default function App() {
             </button>
           </div>
         </nav>
+
+        {business && (
+          <button type="button" className="min-w-0 truncate text-sm text-slate-200"
+            onClick={() => setShowBusinessSetup(true)} title="Meu negócio">
+            {business.name} · Meu negócio
+          </button>
+        )}
 
         {/* Zone 3: Primary Desktop Installer Action + Date/Time Telemetry */}
         <div className="flex items-center gap-4 shrink-0">
@@ -671,10 +740,11 @@ export default function App() {
         />
       ) : workspace === 'CATALOG' ? (
         <CatalogFiscalView
-          products={products}
-          onAddProduct={(newProd) => {
-            setProducts((prev) => [newProd, ...prev]);
-            triggerToast(`Produto "${newProd.name}" cadastrado com NCM ${newProd.ncm}.`);
+          products={availableProducts}
+          profile={profile}
+          onAddProduct={async (newProd) => {
+            if (!(await setProducts((prev) => [newProd, ...prev]))) return;
+            triggerToast(`Produto "${newProd.name}" cadastrado.`);
           }}
           onUpdateProduct={async (updatedProd) => {
             const saved = await saveSnapshot((current) => ({
@@ -741,15 +811,17 @@ export default function App() {
                   placeholder="Buscar produto ou bipar código de barras (F3)..."
                   className="w-full pl-11 pr-32 py-2.5 bg-[#1e2c32] border-[1.5px] border-[#00c885] rounded-lg text-sm text-white placeholder-slate-300/80 focus:outline-none focus:ring-2 focus:ring-[#00c885]/30 transition-all"
                 />
-                <button
-                  type="button"
-                  onClick={handleSimulateBarcodeScan}
-                  className="absolute right-2 px-2.5 py-1 bg-[#283941] hover:bg-[#324650] text-slate-200 rounded text-xs font-medium flex items-center gap-1.5 border border-white/10 transition-colors cursor-pointer"
-                  title="Simular leitura de código de barras EAN-13"
-                >
-                  <Barcode className="w-3.5 h-3.5 text-[#00c885]" />
-                  <span>Bipar EAN</span>
-                </button>
+                {profile !== 'services' && (
+                  <button
+                    type="button"
+                    onClick={handleSimulateBarcodeScan}
+                    className="absolute right-2 px-2.5 py-1 bg-[#283941] hover:bg-[#324650] text-slate-200 rounded text-xs font-medium flex items-center gap-1.5 border border-white/10 transition-colors cursor-pointer"
+                    title="Simular leitura de código de barras EAN-13"
+                  >
+                    <Barcode className="w-3.5 h-3.5 text-[#00c885]" />
+                    <span>Bipar EAN</span>
+                  </button>
+                )}
               </div>
 
               {/* Category Tabs Row matching reference */}
@@ -1020,6 +1092,10 @@ export default function App() {
         </main>
       )}
 
+      {(!business || showBusinessSetup) && (
+        <BusinessSetup business={business} onSave={saveBusiness}
+          onClose={business ? () => setShowBusinessSetup(false) : undefined} />
+      )}
       {/* Toast Feedback Banner */}
       {toastMessage && (
         <div className="fixed bottom-5 right-5 z-[60] bg-[#141e22] border border-[#00c885] text-white px-4 py-2.5 rounded-lg shadow-xl text-xs font-medium">
@@ -1034,6 +1110,7 @@ export default function App() {
       {showCheckoutModal && (
         <CheckoutModal
           items={cart}
+          allowFiscalSimulation={cart.every(item => item.product.kind !== 'service')}
           subtotal={subtotal}
           discount={effectiveDiscount}
           initialCustomerCpf={customerCpf}
@@ -1061,8 +1138,8 @@ export default function App() {
           movements={movements}
           onClose={() => setShowCashModal(false)}
           onAddMovement={handleAddCashMovement}
-          onToggleRegisterStatus={() => {
-            setIsRegisterOpen((prev) => !prev);
+          onToggleRegisterStatus={async () => {
+            if (!(await setField('registerOpen')(!isRegisterOpen))) return;
             triggerToast(
               !isRegisterOpen ? 'Caixa reaberto para vendas.' : 'Caixa fechado temporariamente.'
             );
