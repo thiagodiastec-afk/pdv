@@ -1,3 +1,7 @@
+import serviceCodes from '../data/serviceCodes.json';
+import { readSupplierProducts, type SupplierProduct } from '../data/supplierProducts';
+import { BatchProductImport } from './BatchProductImport';
+import type { BusinessProfile } from './BusinessSetup';
 import React, { useState } from 'react';
 import {
   Plus,
@@ -14,7 +18,9 @@ import { Product, CategoryId, formatBRL } from '../data/posData';
 
 interface CatalogFiscalViewProps {
   products: Product[];
+  profile: BusinessProfile;
   onAddProduct: (prod: Product) => void;
+  onAddProducts: (products: Product[]) => Promise<boolean>;
   onUpdateProduct: (prod: Product) => void;
   onDeleteProduct: (id: string) => void;
   onToggleFavorite: (id: string) => void;
@@ -23,7 +29,9 @@ interface CatalogFiscalViewProps {
 
 export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
   products,
+  profile,
   onAddProduct,
+  onAddProducts,
   onUpdateProduct,
   onDeleteProduct,
   onToggleFavorite,
@@ -33,18 +41,24 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
   const [categoryFilter, setCategoryFilter] = useState<'TODAS' | Exclude<CategoryId, 'Favoritos'>>(
     'TODAS'
   );
+  const [showBatchImport, setShowBatchImport] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // Form fields
+  const [supplierProducts, setSupplierProducts] = useState<SupplierProduct[]>([]);
+  const [importMessage, setImportMessage] = useState('');
+  const [serviceQuery, setServiceQuery] = useState('');
+  const [serviceCode, setServiceCode] = useState('');
+  const [isService, setIsService] = useState(profile === 'services');
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [priceStr, setPriceStr] = useState('');
   const [stockStr, setStockStr] = useState('50');
   const [unit, setUnit] = useState<'UN' | 'KG' | 'LT'>('UN');
   const [category, setCategory] = useState<Exclude<CategoryId, 'Favoritos'>>('Bebidas');
-  const [barcode, setBarcode] = useState('7891000010990');
-  const [ncm, setNcm] = useState('19059090');
+  const [barcode, setBarcode] = useState('');
+  const [ncm, setNcm] = useState('');
   const [cest, setCest] = useState('');
   const [cfop, setCfop] = useState<'5102' | '5405'>('5102');
   const [csosn, setCsosn] = useState<'102' | '500'>('102');
@@ -63,16 +77,27 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
     return matchesCategory && matchesSearch;
   });
 
+  function nextInternalCode() {
+    const codes = new Set(products.map(product => product.code));
+    let nextCode = 1001;
+    while (codes.has(String(nextCode))) nextCode++;
+    return String(nextCode);
+  }
+
   const openNewProductForm = () => {
     setEditingId(null);
-    setCode(String(1000 + products.length + 1));
+    setIsService(profile === 'services');
+    setCode(nextInternalCode());
     setName('');
     setPriceStr('');
-    setStockStr('50');
+    setStockStr('0');
     setUnit('UN');
     setCategory('Bebidas');
-    setBarcode(`7891000010${String(products.length + 12).padStart(3, '0')}`);
-    setNcm('19059090');
+    setBarcode('');
+    setNcm('');
+    setServiceCode('');
+    setServiceQuery('');
+    setImportMessage('');
     setCest('');
     setCfop('5102');
     setCsosn('102');
@@ -81,10 +106,14 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
     setShowForm(true);
   };
 
-  const openEditProductForm = (prod: Product) => {
-    setEditingId(prod.id);
-    setCode(prod.code);
-    setName(prod.name);
+  const openEditProductForm = (prod: Product, duplicate = false) => {
+    setEditingId(duplicate ? null : prod.id);
+    setServiceCode(prod.serviceCode ?? '');
+    setServiceQuery('');
+    setImportMessage('');
+    setIsService(prod.kind === 'service');
+    setCode(duplicate ? nextInternalCode() : prod.code);
+    setName(duplicate ? prod.name + ' (cópia)' : prod.name);
     setPriceStr(prod.price.toFixed(2));
     setStockStr(String(prod.stock));
     setUnit(prod.unit);
@@ -99,14 +128,37 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
     setShowForm(true);
   };
 
+  function applySupplierProduct(product: SupplierProduct) {
+    setName(product.name);
+    setBarcode(product.barcode);
+    setNcm(product.ncm);
+    setCest(product.cest);
+    if (product.unit === 'UN' || product.unit === 'KG' || product.unit === 'LT') setUnit(product.unit);
+    setImportMessage('Dados copiados do XML. Confira a classificação, o preço de venda e o estoque.');
+  }
+
+  const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const serviceTerms = normalize(serviceQuery.trim()).split(/\s+/).filter(Boolean);
+  const serviceMatches = serviceTerms.length ? Object.entries(serviceCodes)
+    .filter(([key, description]) => serviceTerms.every(term => normalize(key + ' ' + description).includes(term)))
+    .slice(0, 12) : [];
+
   const handleSaveForm = (e: React.FormEvent) => {
     e.preventDefault();
     const price = parseFloat(priceStr.replace(',', '.')) || 0;
-    const stock = parseInt(stockStr, 10) || 0;
+    const stock = isService ? 0 : Math.max(0, parseInt(stockStr, 10) || 0);
     const ibptFederalPct = parseFloat(ibptFedStr.replace(',', '.')) || 4.2;
     const ibptStatePct = parseFloat(ibptEstStr.replace(',', '.')) || 12.0;
 
-    if (!name.trim() || price <= 0) return;
+    if (!name.trim() || !Number.isFinite(price) || price <= 0) return;
+    if (products.some(p => p.id !== editingId && p.code === code.trim())) {
+      setImportMessage('Este código interno já está cadastrado.');
+      return;
+    }
+    if (!isService && barcode.trim() && products.some(p => p.id !== editingId && p.barcode === barcode.trim())) {
+      setImportMessage('Este código de barras já está cadastrado.');
+      return;
+    }
 
     const categoryDefaultImage: Record<Exclude<CategoryId, 'Favoritos'>, string> = {
       Bebidas: '/assets/products/cafe_expresso.png',
@@ -121,13 +173,15 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
       const updatedProd: Product = {
         ...existing,
         code: code.trim() || existing.code,
-        barcode: barcode.trim() || existing.barcode,
+        barcode: isService ? '' : barcode.trim(),
         name: name.trim(),
         price,
+        kind: isService ? 'service' : undefined,
+        serviceCode: isService ? serviceCode || undefined : undefined,
         stock,
         unit,
         category,
-        ncm: ncm.replace(/\D/g, '').slice(0, 8).padEnd(8, '0'),
+        ncm: ncm.replace(/\D/g, '').slice(0, 8),
         cest: cest.replace(/\D/g, '') || undefined,
         cfop,
         csosn,
@@ -137,17 +191,19 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
       onUpdateProduct(updatedProd);
     } else {
       const newProd: Product = {
-        id: `prod-${Date.now()}`,
-        code: code.trim() || String(1000 + products.length + 1),
-        barcode: barcode.trim() || `7891000010${products.length + 15}`,
+        id: 'prod-' + crypto.randomUUID(),
+        code: code.trim() || nextInternalCode(),
+        barcode: isService ? '' : barcode.trim(),
         name: name.trim(),
         price,
+        kind: isService ? 'service' : undefined,
+        serviceCode: isService ? serviceCode || undefined : undefined,
         category,
         isFavorite: true,
         featuredInMainGrid: true,
         image: categoryDefaultImage[category],
         unit,
-        ncm: ncm.replace(/\D/g, '').slice(0, 8).padEnd(8, '0'),
+        ncm: ncm.replace(/\D/g, '').slice(0, 8),
         cest: cest.replace(/\D/g, '') || undefined,
         cfop,
         csosn,
@@ -163,12 +219,12 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col p-6 overflow-y-auto space-y-5 bg-[#141e22]">
+    <div className="min-h-0 flex-1 overflow-y-auto space-y-5 bg-[#141e22] p-6 pb-10">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-lg font-bold text-white">
-            Catálogo de Produtos, Estoque & Tributação Fiscal (NCM / CFOP / ICMS)
+            Catálogo de produtos e serviços
           </h1>
           <p className="text-xs text-slate-400">
             Cadastro completo de itens com EAN-13, NCM, CFOP (5102 / 5405), CSOSN, alíquotas IBPT e controle de estoque
@@ -181,8 +237,14 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
             className="px-4 py-2 bg-[#25333a] hover:bg-[#31434c] text-white font-semibold text-xs rounded-lg border border-white/10 flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4 text-[#00c885]" />
-            Cadastrar Produto Fiscal
+            Cadastrar item
           </button>
+          {profile !== 'services' && (
+            <button type="button" aria-expanded={showBatchImport} onClick={() => setShowBatchImport(open => !open)}
+              className="rounded-lg border border-white/10 bg-[#25333a] px-4 py-2 text-xs font-semibold text-white">
+              {showBatchImport ? 'Ocultar importação em lote' : 'Importar XML em lote'}
+            </button>
+          )}
 
           <button
             onClick={onBackToPos}
@@ -222,6 +284,8 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
         </div>
       </div>
 
+      {profile !== 'services' && showBatchImport && <BatchProductImport products={products} onAddProducts={onAddProducts} />}
+
       {/* Add / Edit Product Modal Form */}
       {showForm && (
         <form
@@ -234,7 +298,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
               <span className="text-xs font-bold text-[#00c885] uppercase tracking-wider">
                 {editingId
                   ? `Editando Produto Fiscal #${code} — ${name}`
-                  : 'Novo Cadastro de Produto & Regras Fiscais NFC-e'}
+                  : 'Novo item do catálogo'}
               </span>
             </div>
             <button
@@ -246,6 +310,80 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
             </button>
           </div>
 
+          {!isService && (
+            <div className="space-y-2 rounded border border-white/15 p-3 text-sm">
+              <label className="block">Preencher com XML do fornecedor
+                <input type="file" accept=".xml,text/xml,application/xml" className="mt-1 block"
+                  onChange={async event => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (!file) return;
+                    setSupplierProducts([]);
+                    try {
+                      if (file.size > 5 * 1024 * 1024) throw new Error('Selecione um XML de até 5 MB.');
+                      const entries = readSupplierProducts(await file.text());
+                      setSupplierProducts(entries);
+                      if (entries.length === 1) applySupplierProduct(entries[0]);
+                      else setImportMessage(entries.length ? 'Selecione o item da nota ou digite o código de barras.' : 'Nenhum produto de NF-e encontrado no XML.');
+                    } catch (error) {
+                      setImportMessage(error instanceof Error ? error.message : 'Não foi possível ler o XML.');
+                    }
+                  }} />
+              </label>
+              {supplierProducts.length > 1 && (
+                <label className="block">Item do XML
+                  <select defaultValue="" className="ml-2 max-w-full rounded bg-[#141e22] p-2"
+                    onChange={event => {
+                      if (event.target.value) applySupplierProduct(supplierProducts[Number(event.target.value)]);
+                    }}>
+                    <option value="">Selecione</option>
+                    {supplierProducts.map((product, index) => <option key={index} value={index}>{product.name}</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
+          )}
+          {importMessage && <p role="status" className="text-sm text-amber-200">{importMessage}</p>}
+          {isService && (
+            <div className="space-y-2 rounded border border-white/15 p-3 text-sm">
+              <label className="block">Buscar na lista oficial de serviços
+                <input value={serviceQuery} onChange={event => setServiceQuery(event.target.value)}
+                  placeholder="Ex.: conserto, manutenção ou 140101" className="mt-1 block w-full rounded bg-[#141e22] p-2" />
+              </label>
+              {serviceMatches.length > 0 && (
+                <label className="block">Resultado da busca
+                  <select value="" className="mt-1 block w-full rounded bg-[#141e22] p-2"
+                    onChange={event => {
+                      const code = event.target.value as keyof typeof serviceCodes;
+                      if (!code) return;
+                      setServiceCode(code);
+                      if (!name.trim()) setName(serviceCodes[code]);
+                      setServiceQuery('');
+                    }}>
+                    <option value="">Escolha uma sugestão</option>
+                    {serviceMatches.map(([key, description]) => <option key={key} value={key}>{key} · {description}</option>)}
+                  </select>
+                </label>
+              )}
+              {serviceTerms.length > 0 && serviceMatches.length === 0 && <p>Nenhum serviço encontrado.</p>}
+              <label>Código nacional do serviço
+                <input value={serviceCode} inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
+                  onChange={event => setServiceCode(event.target.value.replace(/\D/g, ''))}
+                  className="ml-2 rounded bg-[#141e22] p-2" />
+              </label>
+              <p className="text-slate-300">Confirme a classificação conforme o município do prestador.</p>
+            </div>
+          )}
+          {profile === 'mixed' && !editingId && (
+            <label className="block text-sm">
+              Tipo do item
+              <select className="ml-2 rounded bg-[#141e22] p-2" value={isService ? 'service' : 'product'}
+                onChange={event => setIsService(event.target.value === 'service')}>
+                <option value="product">Produto</option>
+                <option value="service">Serviço</option>
+              </select>
+            </label>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-6 gap-3">
             <div>
               <label className="block text-[11px] text-slate-400 mb-1">Cód. Interno</label>
@@ -260,12 +398,12 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
 
             <div className="sm:col-span-2">
               <label className="block text-[11px] text-slate-400 mb-1">
-                Descrição Fiscal do Produto (xProd)
+                {isService ? 'Descrição do serviço' : 'Descrição do produto'}
               </label>
               <input
                 type="text"
                 required
-                placeholder="Ex: Café Expresso Duplo"
+                placeholder="Nome do item"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full px-3 py-2 bg-[#141e22] border border-white/15 rounded-lg text-xs text-white focus:outline-none focus:border-[#00c885]"
@@ -280,18 +418,21 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                 min="0.01"
                 required
                 placeholder="0,00"
+                aria-label="Preço unitário"
                 value={priceStr}
                 onChange={(e) => setPriceStr(e.target.value)}
                 className="w-full px-3 py-2 bg-[#141e22] border border-white/15 rounded-lg text-xs text-white font-mono tabular-nums focus:outline-none focus:border-[#00c885]"
               />
             </div>
 
+            {!isService && <>
             <div>
               <label className="block text-[11px] text-slate-400 mb-1">Estoque Atual</label>
               <input
                 type="number"
                 min="0"
                 required
+                aria-label="Estoque atual"
                 value={stockStr}
                 onChange={(e) => setStockStr(e.target.value)}
                 className="w-full px-3 py-2 bg-[#141e22] border border-white/15 rounded-lg text-xs text-white font-mono tabular-nums focus:outline-none focus:border-[#00c885]"
@@ -322,9 +463,10 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                 </select>
               </div>
             </div>
+            </>}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-6 gap-3 pt-1">
+          {!isService && <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-6 gap-3 pt-1">
             <div>
               <label className="block text-[11px] text-slate-400 mb-1">
                 Código EAN-13 / GTIN
@@ -333,7 +475,12 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                 type="text"
                 maxLength={14}
                 value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
+                onChange={event => {
+                  const value = event.target.value;
+                  setBarcode(value);
+                  const matches = supplierProducts.filter(product => product.barcode && product.barcode === value.trim());
+                  if (matches.length === 1) applySupplierProduct(matches[0]);
+                }}
                 className="w-full px-3 py-2 bg-[#141e22] border border-white/15 rounded-lg text-xs text-white font-mono tabular-nums focus:outline-none focus:border-[#00c885]"
               />
             </div>
@@ -343,7 +490,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
               <input
                 type="text"
                 maxLength={8}
-                required
+                pattern="[0-9]{8}"
                 value={ncm}
                 onChange={(e) => setNcm(e.target.value)}
                 className="w-full px-3 py-2 bg-[#141e22] border border-white/15 rounded-lg text-xs text-white font-mono tabular-nums focus:outline-none focus:border-[#00c885]"
@@ -405,7 +552,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                 />
               </div>
             </div>
-          </div>
+          </div>}
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
             <button
@@ -423,7 +570,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
               className="px-5 py-2 bg-[#00c885] hover:bg-[#00b377] text-slate-950 font-bold text-xs rounded-lg flex items-center gap-1.5 cursor-pointer"
             >
               <Check className="w-4 h-4" />
-              {editingId ? 'Salvar Alterações no Produto' : 'Concluir Cadastro Fiscal'}
+              {editingId ? 'Salvar alterações' : 'Salvar item'}
             </button>
           </div>
         </form>
@@ -501,7 +648,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                     CFOP {prod.cfop} · CSOSN {prod.csosn}
                   </td>
                   <td className="py-2.5 px-4 text-right font-mono text-slate-300">
-                    {prod.stock} {prod.unit}
+                    {prod.kind === 'service' ? 'Serviço' : `${prod.stock} ${prod.unit}`}
                   </td>
                   <td className="py-2.5 px-4 text-right font-mono font-bold text-white">
                     {formatBRL(prod.price)}
@@ -528,6 +675,12 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                         <Pencil className="w-3 h-3 text-[#00c885]" />
                         Editar
                       </button>
+                      {prod.kind === 'service' && (
+                        <button type="button" onClick={() => openEditProductForm(prod, true)}
+                          className="rounded bg-[#25333a] px-2.5 py-1 text-xs text-slate-200">
+                          Duplicar serviço
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => onDeleteProduct(prod.id)}

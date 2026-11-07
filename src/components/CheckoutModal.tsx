@@ -20,6 +20,9 @@ import {
 
 interface CheckoutModalProps {
   items: CartItem[];
+  allowFiscalSimulation: boolean;
+  allowRepair: boolean;
+  workOrder?: { equipment: string; quote: number };
   subtotal: number;
   discount: number;
   initialCustomerCpf: string;
@@ -33,11 +36,15 @@ interface CheckoutModalProps {
     customerCpfCnpj: string;
     customerName: string;
     emitirNfce: boolean;
-  }) => void;
+    operation: 'counter' | 'repair';
+  }) => Promise<void>;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   items,
+  allowFiscalSimulation,
+  allowRepair,
+  workOrder,
   subtotal,
   discount,
   initialCustomerCpf,
@@ -46,22 +53,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onClose,
   onConfirmSale,
 }) => {
-  const total = Math.max(0, subtotal - discount);
+  const total = Math.round(Math.max(0, subtotal - discount) * 100) / 100;
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('DINHEIRO');
   const [amountTenderedStr, setAmountTenderedStr] = useState<string>(total.toFixed(2));
   const [customerCpfCnpj, setCustomerCpfCnpj] = useState<string>(initialCustomerCpf);
   const [customerName, setCustomerName] = useState<string>(initialCustomerName);
   const [discountInput, setDiscountInput] = useState<string>(discount > 0 ? discount.toFixed(2) : '');
-  const [emitirNfce, setEmitirNfce] = useState<boolean>(true);
+  const [operation, setOperation] = useState<'counter' | 'repair'>(workOrder ? 'repair' : 'counter');
+  const canSimulate = allowFiscalSimulation && operation === 'counter';
+  const [emitirNfce, setEmitirNfce] = useState<boolean>(false);
   const [transmittingStep, setTransmittingStep] = useState<string | null>(null);
 
   useEffect(() => {
-    const newTotal = Math.max(0, subtotal - discount);
+    const newTotal = Math.round(Math.max(0, subtotal - discount) * 100) / 100;
     setAmountTenderedStr(newTotal.toFixed(2));
   }, [subtotal, discount]);
 
   const parsedTendered = parseFloat(amountTenderedStr.replace(',', '.')) || 0;
-  const effectiveTendered = paymentMethod === 'DINHEIRO' ? Math.max(parsedTendered, total) : total;
+  const effectiveTendered = paymentMethod === 'DINHEIRO' ? parsedTendered : total;
   const changeAmount = paymentMethod === 'DINHEIRO' ? Math.max(0, parsedTendered - total) : 0;
 
   const handleApplyDiscount = (valStr: string) => {
@@ -71,34 +80,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     onUpdateDiscount(clamped);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (transmittingStep) return;
+    if (transmittingStep || (paymentMethod === 'DINHEIRO' && effectiveTendered < total)) return;
 
-    if (emitirNfce) {
-      setTransmittingStep('Assinando XML com Certificado Digital ICP-Brasil A1...');
-      setTimeout(() => {
-        setTransmittingStep('Transmitindo Lote NFC-e para SEFAZ (Ambiente Produção)...');
-      }, 280);
-      setTimeout(() => {
-        onConfirmSale({
-          paymentMethod,
-          amountTendered: effectiveTendered,
-          changeAmount,
-          customerCpfCnpj: customerCpfCnpj.trim(),
-          customerName: customerName.trim(),
-          emitirNfce,
-        });
-      }, 620);
-    } else {
-      onConfirmSale({
+    setTransmittingStep('Salvando venda...');
+    try {
+      await onConfirmSale({
         paymentMethod,
         amountTendered: effectiveTendered,
         changeAmount,
         customerCpfCnpj: customerCpfCnpj.trim(),
         customerName: customerName.trim(),
-        emitirNfce,
+        emitirNfce: canSimulate && emitirNfce,
+        operation,
       });
+    } finally {
+      setTransmittingStep('');
     }
   };
 
@@ -159,10 +157,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <FileCheck2 className="w-5 h-5 text-[#00c885]" />
             <div>
               <h2 className="text-base font-bold text-white">
-                Finalizar Venda & Emitir Nota Fiscal (NFC-e)
+                Finalizar venda
               </h2>
               <p className="text-xs text-slate-400">
-                {items.reduce((acc, i) => acc + i.quantity, 0)} itens no cupom · Modelo 65 SEFAZ
+                {items.reduce((acc, i) => acc + i.quantity, 0)} itens no cupom
               </p>
             </div>
           </div>
@@ -300,11 +298,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={emitirNfce}
+                  checked={canSimulate && emitirNfce}
+                  disabled={!canSimulate}
                   onChange={(e) => setEmitirNfce(e.target.checked)}
                   className="accent-[#00c885] rounded"
                 />
-                Transmitir XML SEFAZ
+                {canSimulate ? 'Gerar NFC-e simulada, sem valor fiscal' : operation === 'repair' ? 'Conserto sem simulação de NFC-e' : 'Venda com serviço sem simulação de NFC-e'}
               </label>
             </div>
 
@@ -336,6 +335,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
           </div>
 
+          {workOrder && <p className="text-sm text-emerald-200">
+            Ordem de serviço · {workOrder.equipment} · Orçamento aprovado {formatBRL(workOrder.quote)}
+          </p>}
+          {allowRepair && !workOrder && (
+            <label className="block text-sm">
+              Tipo de atendimento
+              <select className="mt-1 block w-full rounded bg-[#141e22] p-2" value={operation}
+                onChange={event => setOperation(event.target.value === 'repair' ? 'repair' : 'counter')}>
+                <option value="counter">Balcão</option>
+                <option value="repair">Conserto ou assistência técnica</option>
+              </select>
+            </label>
+          )}
           {transmittingStep && (
             <div className="flex items-center gap-3 px-4 py-3 bg-[#00c885]/15 border border-[#00c885]/40 rounded-lg text-xs text-emerald-200 font-medium">
               <Loader2 className="w-4 h-4 text-[#00c885] animate-spin shrink-0" />
@@ -356,10 +368,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
           <button
             type="submit"
-            disabled={Boolean(transmittingStep)}
+            disabled={Boolean(transmittingStep) || (paymentMethod === 'DINHEIRO' && effectiveTendered < total)}
             className="px-6 py-3 bg-[#00c885] hover:bg-[#00b377] disabled:opacity-60 text-slate-950 font-bold text-sm rounded-lg flex items-center gap-2 transition-colors shadow-lg cursor-pointer"
           >
-            <span>CONFIRMAR E EMITIR NFC-e — {formatBRL(total)}</span>
+            <span>CONFIRMAR VENDA — {formatBRL(total)}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>

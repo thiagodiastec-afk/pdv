@@ -63,7 +63,7 @@ export const FiscalConfigView: React.FC<FiscalConfigViewProps> = ({
       setIsPinging(false);
       const ambLabel = formState.ambienteSefaz.startsWith('2') ? 'Homologação' : 'Produção';
       setSefazPingResult(
-        `cStat 107 — Serviço SEFAZ/SP (${ambLabel}) em Operação · Certificado A1 válido · Latência: 142ms`
+        `Teste simulado no ambiente ${ambLabel}. Nenhuma consulta à SEFAZ foi realizada.`
       );
     }, 500);
   };
@@ -74,12 +74,12 @@ export const FiscalConfigView: React.FC<FiscalConfigViewProps> = ({
     const updated: StoreFiscalConfig = {
       ...formState,
       certificadoArquivoNome: file.name,
-      certificadoValidade: '05/11/2027',
-      certificadoStatus: 'ATIVO',
+      certificadoValidade: 'Não verificada',
+      certificadoStatus: 'PENDENTE',
     };
     setFormState(updated);
     onUpdateStore(updated);
-    triggerSaveFeedback(`Certificado Digital A1 "${file.name}" carregado e validado.`);
+    triggerSaveFeedback(`Certificado Digital A1 "${file.name}" selecionado para demonstração.`);
   };
 
   // Calculations for Accountant Closing (Simples Nacional Segregation CFOP 5102 vs 5405)

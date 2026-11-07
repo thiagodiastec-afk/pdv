@@ -51,50 +51,6 @@ export const DanfeModal: React.FC<DanfeModalProps> = ({
     window.print();
   };
 
-  // Deterministic 21x21 QR Code SVG generator from Chave de Acesso
-  const renderQrCodeSvg = (seedStr: string) => {
-    const size = 21;
-    const isFinderPattern = (r: number, c: number) => {
-      const inTopLeft = r < 7 && c < 7;
-      const inTopRight = r < 7 && c >= size - 7;
-      const inBottomLeft = r >= size - 7 && c < 7;
-      return inTopLeft || inTopRight || inBottomLeft;
-    };
-
-    const getFinderModule = (r: number, c: number) => {
-      const lr = r >= size - 7 ? r - (size - 7) : r;
-      const lc = c >= size - 7 ? c - (size - 7) : c;
-      if (lr === 0 || lr === 6 || lc === 0 || lc === 6) return true;
-      if (lr >= 2 && lr <= 4 && lc >= 2 && lc <= 4) return true;
-      return false;
-    };
-
-    const cells: React.ReactNode[] = [];
-    for (let r = 0; r < size; r++) {
-      for (let c = 0; c < size; c++) {
-        let filled = false;
-        if (isFinderPattern(r, c)) {
-          filled = getFinderModule(r, c);
-        } else {
-          const charCode = seedStr.charCodeAt((r * size + c) % seedStr.length) || 48;
-          filled = (charCode + r * 7 + c * 13) % 3 !== 0;
-        }
-        if (filled) {
-          cells.push(<rect key={`${r}-${c}`} x={c} y={r} width={1} height={1} fill="#111827" />);
-        }
-      }
-    }
-
-    return (
-      <svg
-        viewBox={`0 0 ${size} ${size}`}
-        className="w-28 h-28 mx-auto border border-neutral-300 p-1.5 bg-white"
-        shapeRendering="crispEdges"
-      >
-        {cells}
-      </svg>
-    );
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 overflow-y-auto">
@@ -110,7 +66,7 @@ export const DanfeModal: React.FC<DanfeModalProps> = ({
                   : `NFC-e Nº ${String(invoice.numero).padStart(6, '0')} Emitida com Sucesso`}
               </h2>
               <p className="text-xs text-slate-400 font-mono tabular-nums">
-                Protocolo SEFAZ: {invoice.protocolo} · Série {String(invoice.serie).padStart(3, '0')}
+                Protocolo simulado: {invoice.protocolo} · Série {String(invoice.serie).padStart(3, '0')}
               </p>
             </div>
           </div>
@@ -269,7 +225,7 @@ export const DanfeModal: React.FC<DanfeModalProps> = ({
                 <div className="text-[10px] font-bold tracking-tight bg-neutral-100 p-1.5 rounded border border-neutral-300 break-words tabular-nums">
                   {formatChaveAcesso(invoice.chaveAcesso)}
                 </div>
-                <div className="py-2">{renderQrCodeSvg(invoice.chaveAcesso)}</div>
+                <p className="py-2 font-bold">SIMULAÇÃO · SEM VALOR FISCAL</p>
                 <div className="text-[9px] text-neutral-700 tabular-nums">
                   Protocolo de Autorização: <span className="font-bold">{invoice.protocolo}</span>
                 </div>
@@ -282,11 +238,11 @@ export const DanfeModal: React.FC<DanfeModalProps> = ({
             <div className="space-y-4">
               <div className="bg-[#141e22] border border-white/10 rounded-lg p-4 space-y-3">
                 <div className="text-xs font-medium text-slate-400">
-                  Status de Transmissão SEFAZ
+                  Resultado da simulação
                 </div>
                 <div className="text-sm font-semibold text-white">
                   {invoice.status === 'CANCELADA'
-                    ? '101 - Cancelamento de NFC-e Homologado'
+                    ? 'Cancelamento simulado'
                     : '100 - Autorizado o uso da NFC-e'}
                 </div>
                 <div className="text-xs text-slate-400">
@@ -353,7 +309,7 @@ export const DanfeModal: React.FC<DanfeModalProps> = ({
                       className="w-full py-2 px-3 text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <Ban className="w-3.5 h-3.5" />
-                      Cancelar NFC-e na SEFAZ (Prazo Legal 30 min)
+                      Simular cancelamento da NFC-e
                     </button>
                   ) : (
                     <div className="bg-red-950/30 border border-red-500/30 rounded-lg p-3 space-y-2">
