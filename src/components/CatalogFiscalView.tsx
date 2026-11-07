@@ -1,5 +1,6 @@
 import serviceCodes from '../data/serviceCodes.json';
 import { readSupplierProducts, type SupplierProduct } from '../data/supplierProducts';
+import { BatchProductImport } from './BatchProductImport';
 import type { BusinessProfile } from './BusinessSetup';
 import React, { useState } from 'react';
 import {
@@ -19,6 +20,7 @@ interface CatalogFiscalViewProps {
   products: Product[];
   profile: BusinessProfile;
   onAddProduct: (prod: Product) => void;
+  onAddProducts: (products: Product[]) => Promise<boolean>;
   onUpdateProduct: (prod: Product) => void;
   onDeleteProduct: (id: string) => void;
   onToggleFavorite: (id: string) => void;
@@ -29,6 +31,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
   products,
   profile,
   onAddProduct,
+  onAddProducts,
   onUpdateProduct,
   onDeleteProduct,
   onToggleFavorite,
@@ -38,6 +41,7 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
   const [categoryFilter, setCategoryFilter] = useState<'TODAS' | Exclude<CategoryId, 'Favoritos'>>(
     'TODAS'
   );
+  const [showBatchImport, setShowBatchImport] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -73,10 +77,17 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
     return matchesCategory && matchesSearch;
   });
 
+  function nextInternalCode() {
+    const codes = new Set(products.map(product => product.code));
+    let nextCode = 1001;
+    while (codes.has(String(nextCode))) nextCode++;
+    return String(nextCode);
+  }
+
   const openNewProductForm = () => {
     setEditingId(null);
     setIsService(profile === 'services');
-    setCode(String(1000 + products.length + 1));
+    setCode(nextInternalCode());
     setName('');
     setPriceStr('');
     setStockStr('0');
@@ -95,14 +106,14 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
     setShowForm(true);
   };
 
-  const openEditProductForm = (prod: Product) => {
-    setEditingId(prod.id);
+  const openEditProductForm = (prod: Product, duplicate = false) => {
+    setEditingId(duplicate ? null : prod.id);
     setServiceCode(prod.serviceCode ?? '');
     setServiceQuery('');
     setImportMessage('');
     setIsService(prod.kind === 'service');
-    setCode(prod.code);
-    setName(prod.name);
+    setCode(duplicate ? nextInternalCode() : prod.code);
+    setName(duplicate ? prod.name + ' (cópia)' : prod.name);
     setPriceStr(prod.price.toFixed(2));
     setStockStr(String(prod.stock));
     setUnit(prod.unit);
@@ -140,6 +151,10 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
     const ibptStatePct = parseFloat(ibptEstStr.replace(',', '.')) || 12.0;
 
     if (!name.trim() || !Number.isFinite(price) || price <= 0) return;
+    if (products.some(p => p.id !== editingId && p.code === code.trim())) {
+      setImportMessage('Este código interno já está cadastrado.');
+      return;
+    }
     if (!isService && barcode.trim() && products.some(p => p.id !== editingId && p.barcode === barcode.trim())) {
       setImportMessage('Este código de barras já está cadastrado.');
       return;
@@ -176,8 +191,8 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
       onUpdateProduct(updatedProd);
     } else {
       const newProd: Product = {
-        id: `prod-${Date.now()}`,
-        code: code.trim() || String(1000 + products.length + 1),
+        id: 'prod-' + crypto.randomUUID(),
+        code: code.trim() || nextInternalCode(),
         barcode: isService ? '' : barcode.trim(),
         name: name.trim(),
         price,
@@ -224,6 +239,12 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
             <Plus className="w-4 h-4 text-[#00c885]" />
             Cadastrar item
           </button>
+          {profile !== 'services' && (
+            <button type="button" aria-expanded={showBatchImport} onClick={() => setShowBatchImport(open => !open)}
+              className="rounded-lg border border-white/10 bg-[#25333a] px-4 py-2 text-xs font-semibold text-white">
+              {showBatchImport ? 'Ocultar importação em lote' : 'Importar XML em lote'}
+            </button>
+          )}
 
           <button
             onClick={onBackToPos}
@@ -262,6 +283,8 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
           </div>
         </div>
       </div>
+
+      {profile !== 'services' && showBatchImport && <BatchProductImport products={products} onAddProducts={onAddProducts} />}
 
       {/* Add / Edit Product Modal Form */}
       {showForm && (
@@ -652,6 +675,12 @@ export const CatalogFiscalView: React.FC<CatalogFiscalViewProps> = ({
                         <Pencil className="w-3 h-3 text-[#00c885]" />
                         Editar
                       </button>
+                      {prod.kind === 'service' && (
+                        <button type="button" onClick={() => openEditProductForm(prod, true)}
+                          className="rounded bg-[#25333a] px-2.5 py-1 text-xs text-slate-200">
+                          Duplicar serviço
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => onDeleteProduct(prod.id)}

@@ -197,8 +197,8 @@ const key = 'cromapdv_snapshot_v1';
     await fresh.getByRole('button', { name: 'Vendas', exact: true }).click();
     await fresh.getByRole('heading', { name: 'Histórico de vendas' }).waitFor();
     await fresh.getByRole('button', { name: /DINHEIRO/ }).click();
-    await fresh.getByText('1 × Corte teste').waitFor();
-    await fresh.getByText('1 × Shampoo revisado').waitFor();
+    await fresh.getByText('1 × Corte teste', { exact: true }).waitFor();
+    await fresh.getByText('1 × Shampoo revisado', { exact: true }).waitFor();
     await fresh.getByText('Conserto ou assistência técnica', { exact: true }).waitFor();
     console.log('PASS XML, edição, lista de serviços e conserto misto sem emissão');
   } finally { await browser.close(); }

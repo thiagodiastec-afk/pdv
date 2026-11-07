@@ -59,6 +59,11 @@ export type SaleOperation = 'counter' | 'repair';
 
 export interface CashMovement {
   operation?: SaleOperation;
+  customerName?: string;
+  customerCpfCnpj?: string;
+  returnSaleId?: string;
+  workOrderId?: string;
+  invoiceId?: string;
   id: string;
   type: 'ABERTURA' | 'VENDA' | 'SANGRIA' | 'SUPRIMENTO' | 'ESTORNO';
   amount: number;

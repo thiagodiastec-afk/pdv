@@ -60,3 +60,21 @@ Referências oficiais: [NFC-e em São Paulo](https://portal.fazenda.sp.gov.br/se
 - Produtos. Em **Catálogo → Cadastrar item**, carregue o XML de uma NF-e do fornecedor. Se houver vários itens, escolha um deles ou digite o GTIN presente no arquivo. O PDV copia descrição, GTIN, NCM, CEST e a unidade quando suportada. Revise os dados e preencha preço de venda e estoque. O CFOP do fornecedor não é copiado.
 - Serviços. Selecione **Serviço** e busque pelo nome ou código na lista nacional. O código escolhido e a descrição sugerida podem ser alterados. A referência incluída no aplicativo é a [lista publicada pelo Portal Nacional da NFS-e](https://www.gov.br/nfse/pt-br/mei-e-demais-empresas/codigos-de-tributacao-nacional-nbs), consultada em 6 de novembro de 2026.
 - Para ajustar depois, abra o item em **Editar**. Sem XML, o produto pode ser cadastrado manualmente. A consulta a uma base externa por GTIN depende de uma integração futura.
+
+## Rotinas de operação
+
+- **Caixa por turno.** Em F7, informe o saldo inicial na abertura. No fechamento, informe o dinheiro contado. Confira o saldo esperado e a diferença em Fechamentos registrados.
+- **Backup.** Exporte o JSON e guarde em local seguro. Para restaurar em outro terminal, configure o perfil inicial, abra Backup, selecione o arquivo e confirme a substituição dos dados locais.
+- **Catálogo.** Use a importação em lote para revisar e cadastrar itens de uma NF-e. O preço de venda e o estoque são preenchidos durante a revisão. O comando de duplicação abre uma cópia editável de um serviço.
+- **Ordens de serviço.** Nos perfis Serviços ou Operação mista, cadastre cliente, equipamento e orçamento. Adicione peças e mão de obra do catálogo, marque a aprovação e envie para o caixa. A venda concluída fica vinculada à ordem.
+- **Vendas.** Busque por período ou cliente, abra a venda e imprima o comprovante sem valor fiscal. Devoluções totais e parciais ficam disponíveis para vendas sem nota simulada. Para vendas com nota simulada, use o cancelamento no fluxo fiscal.
+
+### Testes adicionais no Edge
+
+Com a prévia aberta, execute:
+
+```powershell
+node tests/operations.cjs
+node tests/catalog-batch.cjs
+node tests/sales-history.cjs
+```

@@ -22,6 +22,7 @@ interface CheckoutModalProps {
   items: CartItem[];
   allowFiscalSimulation: boolean;
   allowRepair: boolean;
+  workOrder?: { equipment: string; quote: number };
   subtotal: number;
   discount: number;
   initialCustomerCpf: string;
@@ -43,6 +44,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   items,
   allowFiscalSimulation,
   allowRepair,
+  workOrder,
   subtotal,
   discount,
   initialCustomerCpf,
@@ -57,7 +59,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [customerCpfCnpj, setCustomerCpfCnpj] = useState<string>(initialCustomerCpf);
   const [customerName, setCustomerName] = useState<string>(initialCustomerName);
   const [discountInput, setDiscountInput] = useState<string>(discount > 0 ? discount.toFixed(2) : '');
-  const [operation, setOperation] = useState<'counter' | 'repair'>('counter');
+  const [operation, setOperation] = useState<'counter' | 'repair'>(workOrder ? 'repair' : 'counter');
   const canSimulate = allowFiscalSimulation && operation === 'counter';
   const [emitirNfce, setEmitirNfce] = useState<boolean>(false);
   const [transmittingStep, setTransmittingStep] = useState<string | null>(null);
@@ -333,7 +335,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
           </div>
 
-          {allowRepair && (
+          {workOrder && <p className="text-sm text-emerald-200">
+            Ordem de serviço · {workOrder.equipment} · Orçamento aprovado {formatBRL(workOrder.quote)}
+          </p>}
+          {allowRepair && !workOrder && (
             <label className="block text-sm">
               Tipo de atendimento
               <select className="mt-1 block w-full rounded bg-[#141e22] p-2" value={operation}

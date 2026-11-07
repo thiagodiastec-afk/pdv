@@ -40,26 +40,73 @@ import {
 import { CheckoutModal } from './components/CheckoutModal';
 import { DanfeModal } from './components/DanfeModal';
 import { CashMovementModal } from './components/CashMovementModal';
+import { getCashBalance, getShiftMovements, type CashClosing } from './data/cashShifts';
 import { InvoicesHistoryView } from './components/InvoicesHistoryView';
 import { CatalogFiscalView } from './components/CatalogFiscalView';
 import { FiscalConfigView } from './components/FiscalConfigView';
 import { ServiceFiscalSettings, type ServiceFiscalConfig } from './components/ServiceFiscalSettings';
+import { BackupSettings } from './components/BackupSettings';
+import { WorkOrders, type WorkOrder } from './components/WorkOrders';
 import { SalesHistory } from './components/SalesHistory';
 import { BusinessSetup, type Business } from './components/BusinessSetup';
 import { DesktopInstallerModal } from './components/DesktopInstallerModal';
 
-type ActiveWorkspace = 'POS' | 'SALES' | 'NFCE_HISTORY' | 'CATALOG' | 'CONFIG_FISCAL' | 'CONFIG_SERVICES';
+type ActiveWorkspace = 'POS' | 'SALES' | 'NFCE_HISTORY' | 'CATALOG' | 'CONFIG_FISCAL' | 'CONFIG_SERVICES' | 'ORDERS' | 'BACKUP';
 
 type Snapshot = {
   business?: Business;
+  orders?: WorkOrder[];
+  checkoutOrderId?: string;
   serviceFiscal?: ServiceFiscalConfig;
   registerOpen?: boolean;
+  cashClosings?: CashClosing[];
   products: Product[];
   cart: CartItem[];
   invoices: FiscalInvoice[];
   movements: CashMovement[];
   storeConfig: typeof INITIAL_STORE_CONFIG;
 };
+
+function isBackup(value: unknown): value is { data: Snapshot } {
+  function record(entry: unknown): entry is Record<string, unknown> {
+    return entry !== null && typeof entry === 'object' && !Array.isArray(entry);
+  }
+  const string = (entry: unknown) => typeof entry === 'string';
+  const number = (entry: unknown) => typeof entry === 'number' && Number.isFinite(entry);
+  const array = (entry: unknown, valid: (item: unknown) => boolean) => Array.isArray(entry) && entry.every(valid);
+  const optional = (entry: unknown, valid: (item: unknown) => boolean) => entry === undefined || valid(entry);
+  const product = (entry: unknown) => record(entry) &&
+    ['id', 'name', 'code', 'barcode', 'ncm', 'category', 'image', 'unit', 'cfop', 'csosn'].every(key => string(entry[key])) &&
+    ['price', 'stock', 'ibptFederalPct', 'ibptStatePct'].every(key => number(entry[key]));
+  const items = (entry: unknown) => array(entry, item => record(item) && product(item.product) &&
+    Number.isSafeInteger(item.quantity) && Number(item.quantity) > 0);
+  if (!record(value) || value.format !== 'CromaPDV' || value.version !== 1 || !record(value.data)) return false;
+  const data = value.data;
+  const storeConfig = data.storeConfig;
+  return record(storeConfig) &&
+    Object.entries(INITIAL_STORE_CONFIG).every(([key, fallback]) => typeof storeConfig[key] === typeof fallback) &&
+    optional(data.business, item => record(item) && string(item.name) &&
+      ['retail', 'services', 'mixed'].includes(String(item.profile)) &&
+      optional(item.operatorName, string) && optional(item.logo, logo => typeof logo === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(logo))) &&
+    optional(data.serviceFiscal, item => record(item) &&
+      ['municipality', 'municipalityCode', 'municipalRegistration', 'issuer'].every(key => string(item[key]))) &&
+    optional(data.registerOpen, item => typeof item === 'boolean') &&
+    optional(data.checkoutOrderId, string) &&
+    array(data.products, product) && items(data.cart) &&
+    array(data.invoices, item => record(item) && items(item.items) &&
+      ['id', 'createdAt', 'operatorName', 'status', 'paymentMethod', 'chaveAcesso', 'protocolo'].every(key => string(item[key])) &&
+      ['numero', 'serie', 'total', 'subtotal', 'discount'].every(key => number(item[key]))) &&
+    array(data.movements, item => record(item) && optional(item.items, items) &&
+      ['id', 'type', 'description', 'createdAt', 'operatorName'].every(key => string(item[key])) && number(item.amount)) &&
+    optional(data.orders, entry => array(entry, item => record(item) &&
+      ['id', 'customer', 'equipment', 'serial', 'issue', 'createdAt'].every(key => string(item[key])) &&
+      number(item.quote) && typeof item.approved === 'boolean' && optional(item.saleId, string) &&
+      optional(item.lines, lines => array(lines, line => record(line) && string(line.productId) &&
+        Number.isSafeInteger(line.quantity) && Number(line.quantity) > 0)))) &&
+    optional(data.cashClosings, entry => array(entry, item => record(item) &&
+      ['id', 'createdAt', 'operatorName'].every(key => string(item[key])) &&
+      ['expected', 'counted', 'difference'].every(key => number(item[key]))));
+}
 
 const SNAPSHOT_KEY = 'cromapdv_snapshot_v1';
 
@@ -95,6 +142,7 @@ export default function App() {
   const { products, invoices, movements, storeConfig, cart, business } = snapshot;
   const [showBusinessSetup, setShowBusinessSetup] = useState(false);
   const profile = business?.profile ?? 'mixed';
+  const operatorName = business?.operatorName ?? 'Operador local';
   const availableProducts = products.filter(product =>
     profile === 'mixed' || (profile === 'services' ? product.kind === 'service' : product.kind !== 'service')
   );
@@ -197,7 +245,6 @@ export default function App() {
   const setProducts = setField('products');
   const setCart = setField('cart');
   const setInvoices = setField('invoices');
-  const setMovements = setField('movements');
   const setStoreConfig = setField('storeConfig');
 
   async function saveBusiness(nextBusiness: Business, demo: boolean) {
@@ -247,6 +294,64 @@ export default function App() {
     });
     if (saved) setShowBusinessSetup(false);
     return saved;
+  }
+
+  function exportBackup() {
+    const { saved: version, ...data } = snapshotRef.current;
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ format: 'CromaPDV', version: 1, data })], {
+      type: 'application/json',
+    }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'CromaPDV-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function restoreBackup(value: unknown) {
+    if (!isBackup(value)) throw new Error('Backup inválido');
+    const saved = await saveSnapshot(() => value.data);
+    if (saved) {
+      setDiscount(0);
+      setCustomerCpf('');
+      setCustomerName('');
+      setWorkspace('POS');
+      triggerToast('Backup restaurado.');
+    }
+    return saved;
+  }
+
+  async function chargeOrder(order: WorkOrder) {
+    if (snapshot.checkoutOrderId === order.id) {
+      setWorkspace('POS');
+      return;
+    }
+    if (cart.length || snapshot.checkoutOrderId) {
+      triggerToast('Finalize ou limpe a cobrança atual antes de enviar outra ordem.');
+      return;
+    }
+    const orderItems: CartItem[] = [];
+    for (const line of order.lines ?? []) {
+      const product = availableProducts.find(entry => entry.id === line.productId);
+      if (!product || !Number.isSafeInteger(line.quantity) || line.quantity < 1 ||
+        (product.kind !== 'service' && line.quantity > product.stock)) {
+        triggerToast('Revise os itens da ordem. Há produto indisponível ou estoque insuficiente.');
+        return;
+      }
+      orderItems.push({ product, quantity: line.quantity });
+    }
+    const saved = await saveSnapshot(current => {
+      if (snapshotRef.current !== snapshot || current.cart.length || current.checkoutOrderId ||
+        !current.orders?.some(entry => entry.id === order.id && entry.approved && !entry.saleId)) {
+        throw new Error('Ordem indisponível');
+      }
+      return { ...current, checkoutOrderId: order.id, cart: orderItems };
+    });
+    if (saved) {
+      setCustomerName(order.customer);
+      setWorkspace('POS');
+      triggerToast(orderItems.length ? 'Itens da ordem enviados ao caixa.' : 'Adicione as peças e a mão de obra da ordem ao carrinho.');
+    }
   }
 
   const subtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
@@ -300,7 +405,7 @@ export default function App() {
   };
 
   const clearCart = () => {
-    setCart([]);
+    void saveSnapshot(current => ({ ...current, cart: [], checkoutOrderId: undefined }));
     setDiscount(0);
     setCustomerCpf('');
     setCustomerName('');
@@ -452,13 +557,15 @@ export default function App() {
       0
     );
 
-    const newInvoice: FiscalInvoice | null = payload.operation === 'counter' && payload.emitirNfce && cart.every(item => item.product.kind !== 'service') ? {
+    const checkoutOrderId = snapshot.checkoutOrderId;
+    const operation = checkoutOrderId ? 'repair' : payload.operation;
+    const newInvoice: FiscalInvoice | null = operation === 'counter' && payload.emitirNfce && cart.every(item => item.product.kind !== 'service') ? {
       id: `inv-${numeroNfce}-${Date.now()}`,
       numero: numeroNfce,
       serie: storeConfig.seriePadrao,
       modelo: '65',
       createdAt: formattedTimestamp,
-      operatorName: 'Maurício',
+      operatorName,
       items: [...cart],
       subtotal,
       discount: effectiveDiscount,
@@ -483,9 +590,13 @@ export default function App() {
       paymentMethod: payload.paymentMethod,
       description: newInvoice ? `Venda com NFC-e simulada #${String(numeroNfce).padStart(6, '0')}` : "Venda sem NFC-e",
       createdAt: formattedTimestamp,
-      operatorName: 'Maurício',
+      operatorName,
       invoiceNumero: newInvoice?.numero,
-      operation: payload.operation,
+      operation,
+      invoiceId: newInvoice?.id,
+      workOrderId: checkoutOrderId,
+      customerName: payload.customerName || snapshot.orders?.find(order => order.id === checkoutOrderId)?.customer,
+      customerCpfCnpj: payload.customerCpfCnpj || undefined,
       items: cart,
       discount: effectiveDiscount,
     };
@@ -504,6 +615,8 @@ export default function App() {
           return soldItem && product.kind !== 'service' ? { ...product, stock: product.stock - soldItem.quantity } : product;
         }),
         cart: [],
+        checkoutOrderId: undefined,
+        orders: current.orders?.map(order => order.id === checkoutOrderId ? { ...order, saleId: saleMovement.id } : order),
       };
     });
     if (!saved) return;
@@ -514,6 +627,49 @@ export default function App() {
     setActiveDanfeInvoice(newInvoice);
     if (!newInvoice) triggerToast("Venda registrada sem NFC-e.");
   };
+
+  async function returnSale(saleId: string, quantities: Record<string, number>, reason: string) {
+    if (!isRegisterOpen) {
+      triggerToast('Abra o caixa para registrar a devolução.');
+      return false;
+    }
+    const saved = await saveSnapshot(current => {
+      const sale = current.movements.find(entry => entry.id === saleId && entry.type === 'VENDA');
+      if (!sale?.items?.length || sale.invoiceNumero !== undefined || !reason.trim()) throw new Error('Venda indisponível');
+      const previous = current.movements.filter(entry => entry.returnSaleId === saleId);
+      const items = sale.items.flatMap(item => {
+        const quantity = quantities[item.product.id] ?? 0;
+        const alreadyReturned = previous.flatMap(entry => entry.items ?? [])
+          .filter(entry => entry.product.id === item.product.id).reduce((sum, entry) => sum + entry.quantity, 0);
+        if (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > item.quantity - alreadyReturned) {
+          throw new Error('Quantidade inválida');
+        }
+        return quantity ? [{ ...item, quantity }] : [];
+      });
+      if (!items.length || items.some(item => item.product.kind !== 'service' &&
+        !current.products.some(product => product.id === item.product.id))) throw new Error('Itens indisponíveis');
+      const gross = (entries: CartItem[]) => entries.reduce((sum, item) =>
+        sum + Math.round(item.product.price * 100) * item.quantity, 0);
+      const totalGross = gross(sale.items);
+      const refundedGross = gross(previous.flatMap(entry => entry.items ?? []));
+      const refundedCents = previous.reduce((sum, entry) => sum + Math.round(entry.amount * 100), 0);
+      const amount = (Math.round(Math.round(sale.amount * 100) * (refundedGross + gross(items)) / totalGross) - refundedCents) / 100;
+      const reversal: CashMovement = {
+        id: crypto.randomUUID(), type: 'ESTORNO', amount, paymentMethod: sale.paymentMethod,
+        description: 'Devolução: ' + reason.trim(), createdAt: new Date().toLocaleString('pt-BR'),
+        operatorName, returnSaleId: saleId, items,
+      };
+      return {
+        ...current, movements: [reversal, ...current.movements],
+        products: current.products.map(product => {
+          const item = items.find(entry => entry.product.id === product.id);
+          return item && product.kind !== 'service' ? { ...product, stock: product.stock + item.quantity } : product;
+        }),
+      };
+    });
+    if (saved) triggerToast('Devolução registrada no caixa.');
+    return saved;
+  }
 
   const handleCancelInvoice = async (invoiceId: string, reason: string) => {
     const target = invoices.find((i) => i.id === invoiceId);
@@ -528,7 +684,7 @@ export default function App() {
       paymentMethod: target.paymentMethod,
       description: `Estorno NFC-e #${String(target.numero).padStart(6, '0')} (${reason})`,
       createdAt: formattedTimestamp,
-      operatorName: 'Maurício',
+      operatorName,
       invoiceNumero: target.numero,
     };
     const saved = await saveSnapshot((current) => {
@@ -555,25 +711,43 @@ export default function App() {
     triggerToast(`NFC-e #${String(target.numero).padStart(6, '0')} cancelada na simulação.`);
   };
 
-  const handleAddCashMovement = (
+  const handleAddCashMovement = async (
     type: 'SANGRIA' | 'SUPRIMENTO',
     amount: number,
     description: string
   ) => {
+    if (!Number.isFinite(amount) || amount <= 0) return false;
+    const roundedAmount = Math.round(amount * 100) / 100;
+    if (roundedAmount <= 0) return false;
+    if (!isRegisterOpen) {
+      triggerToast('Abra o caixa antes de registrar uma movimentação.');
+      return false;
+    }
+    if (type === 'SANGRIA' && roundedAmount > getCashBalance(getShiftMovements(movements))) {
+      triggerToast('O valor da sangria excede o saldo em dinheiro do turno.');
+      return false;
+    }
     const now = new Date();
     const formattedTimestamp = `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR')}`;
     const newMov: CashMovement = {
       id: `mov-${Date.now()}`,
       type,
-      amount,
+      amount: roundedAmount,
       description,
       createdAt: formattedTimestamp,
-      operatorName: 'Maurício',
+      operatorName,
     };
-    setMovements((prev) => [newMov, ...prev]);
-    triggerToast(
-      `${type === 'SANGRIA' ? 'Sangria' : 'Suprimento'} de ${formatBRL(amount)} registrado.`
-    );
+    const saved = await saveSnapshot(current => {
+      if (current.registerOpen === false) throw new Error('Abra o caixa antes de registrar uma movimentação.');
+      if (type === 'SANGRIA' && roundedAmount > getCashBalance(getShiftMovements(current.movements))) {
+        throw new Error('O valor da sangria excede o saldo em dinheiro do turno.');
+      }
+      return { ...current, movements: [newMov, ...current.movements] };
+    });
+    if (saved) {
+      triggerToast(`${type === 'SANGRIA' ? 'Sangria' : 'Suprimento'} de ${formatBRL(roundedAmount)} registrado.`);
+    }
+    return saved;
   };
 
   // Filter products for the POS grid
@@ -628,13 +802,13 @@ export default function App() {
           <div className="flex items-center gap-2.5">
             <img
               src="/assets/products/operador_mauricio.png"
-              alt="Operador Maurício"
+              alt=""
               referrerPolicy="no-referrer"
               className="w-9 h-9 rounded-full object-cover border border-white/20 shrink-0"
             />
             <div className="leading-tight">
               <div className="text-[11px] text-slate-400 font-normal">Operador</div>
-              <div className="text-sm font-bold text-white whitespace-nowrap">Maurício</div>
+              <div className="text-sm font-bold text-white whitespace-nowrap">{operatorName}</div>
             </div>
           </div>
         </div>
@@ -687,6 +861,10 @@ export default function App() {
             >
               Catálogo
             </button>
+            {profile !== 'retail' && (
+              <button className="shrink-0 text-slate-300" onClick={() => setWorkspace('ORDERS')}>Ordens de serviço</button>
+            )}
+            <button className="shrink-0 text-slate-300" onClick={() => setWorkspace('BACKUP')}>Backup</button>
             <button
               onClick={() => setWorkspace(profile === 'services' ? 'CONFIG_SERVICES' : 'CONFIG_FISCAL')}
               className={`whitespace-nowrap shrink-0 py-1 transition-colors cursor-pointer ${
@@ -730,9 +908,27 @@ export default function App() {
         </div>
       </header>
 
+      {workspace === 'POS' && snapshot.checkoutOrderId && (
+        <div className="flex shrink-0 items-center justify-between bg-emerald-950 px-5 py-2 text-sm">
+          <span>Ordem em cobrança · {snapshot.orders?.find(order => order.id === snapshot.checkoutOrderId)?.equipment}</span>
+          <button type="button" onClick={() => {
+            if (cart.length && !window.confirm('Limpar o carrinho e retirar a ordem da cobrança?')) return;
+            void saveSnapshot(current => ({ ...current, cart: [], checkoutOrderId: undefined }));
+          }}>Retirar ordem da cobrança</button>
+        </div>
+      )}
       {/* Main Content Area */}
-      {workspace === 'SALES' ? (
-        <SalesHistory movements={movements} invoices={invoices} />
+      {workspace === 'BACKUP' ? (
+        <BackupSettings onExport={exportBackup} onRestore={restoreBackup} />
+      ) : workspace === 'ORDERS' ? (
+        <WorkOrders orders={snapshot.orders ?? []} products={availableProducts} checkoutOrderId={snapshot.checkoutOrderId}
+          onCharge={chargeOrder}
+          onSave={order => saveSnapshot(current => ({
+            ...current,
+            orders: [order, ...(current.orders ?? []).filter(entry => entry.id !== order.id)],
+          }))} />
+      ) : workspace === 'SALES' ? (
+        <SalesHistory movements={movements} invoices={invoices} businessName={business?.name} onReturn={returnSale} />
       ) : workspace === 'NFCE_HISTORY' ? (
         <InvoicesHistoryView
           invoices={invoices}
@@ -754,6 +950,18 @@ export default function App() {
         <CatalogFiscalView
           products={availableProducts}
           profile={profile}
+          onAddProducts={batch => saveSnapshot(current => {
+            const usedCodes = new Set(current.products.map(product => product.code));
+            const usedBarcodes = new Set(current.products.map(product => product.barcode).filter(Boolean));
+            for (const product of batch) {
+              if (usedCodes.has(product.code) || (product.barcode && usedBarcodes.has(product.barcode))) {
+                throw new Error('Cadastro duplicado');
+              }
+              usedCodes.add(product.code);
+              if (product.barcode) usedBarcodes.add(product.barcode);
+            }
+            return { ...current, products: [...batch, ...current.products] };
+          })}
           onAddProduct={async (newProd) => {
             if (!(await setProducts((prev) => [newProd, ...prev]))) return;
             triggerToast(`Produto "${newProd.name}" cadastrado.`);
@@ -1141,12 +1349,13 @@ export default function App() {
       {showCheckoutModal && (
         <CheckoutModal
           items={cart}
+          workOrder={snapshot.orders?.find(order => order.id === snapshot.checkoutOrderId)}
           allowRepair={profile !== 'retail'}
           allowFiscalSimulation={cart.every(item => item.product.kind !== 'service')}
           subtotal={subtotal}
           discount={effectiveDiscount}
           initialCustomerCpf={customerCpf}
-          initialCustomerName={customerName}
+          initialCustomerName={snapshot.orders?.find(order => order.id === snapshot.checkoutOrderId)?.customer ?? customerName}
           onUpdateDiscount={(d) => setDiscount(d)}
           onClose={() => setShowCheckoutModal(false)}
           onConfirmSale={handleConfirmSale}
@@ -1166,15 +1375,45 @@ export default function App() {
       {/* Cash Register / Sangria / Suprimento Modal (F7) */}
       {showCashModal && (
         <CashMovementModal
+          operatorName={operatorName}
           isOpenRegister={isRegisterOpen}
-          movements={movements}
+          movements={getShiftMovements(movements)}
+          closings={snapshot.cashClosings ?? []}
           onClose={() => setShowCashModal(false)}
           onAddMovement={handleAddCashMovement}
-          onToggleRegisterStatus={async () => {
-            if (!(await setField('registerOpen')(!isRegisterOpen))) return;
-            triggerToast(
-              !isRegisterOpen ? 'Caixa reaberto para vendas.' : 'Caixa fechado temporariamente.'
-            );
+          onToggleRegisterStatus={async (amount) => {
+            if (!Number.isFinite(amount) || amount < 0) return false;
+            const rounded = Math.round(amount * 100) / 100;
+            const now = new Date();
+            const createdAt = `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR')}`;
+            const saved = await saveSnapshot(current => {
+              if ((current.registerOpen ?? true) !== isRegisterOpen) throw new Error('O estado do caixa mudou.');
+              if (!isRegisterOpen) {
+                const opening: CashMovement = {
+                  id: `opening-${Date.now()}`,
+                  type: 'ABERTURA',
+                  amount: rounded,
+                  description: 'Saldo inicial do turno',
+                  createdAt,
+                  operatorName,
+                };
+                return { ...current, registerOpen: true, movements: [opening, ...current.movements] };
+              }
+              const shift = getShiftMovements(current.movements);
+              const expected = getCashBalance(shift);
+              const closing: CashClosing = {
+                id: `closing-${Date.now()}`,
+                openingId: shift.find(movement => movement.type === 'ABERTURA')?.id,
+                createdAt,
+                operatorName,
+                expected,
+                counted: rounded,
+                difference: Math.round((rounded - expected) * 100) / 100,
+              };
+              return { ...current, registerOpen: false, cashClosings: [closing, ...(current.cashClosings ?? [])] };
+            });
+            if (saved) triggerToast(isRegisterOpen ? 'Fechamento do turno registrado.' : 'Caixa aberto para vendas.');
+            return saved;
           }}
         />
       )}

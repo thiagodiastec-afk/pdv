@@ -4,6 +4,7 @@ export type BusinessProfile = 'retail' | 'services' | 'mixed';
 
 export interface Business {
   name: string;
+  operatorName?: string;
   logo?: string;
   profile: BusinessProfile;
 }
@@ -20,6 +21,7 @@ export function BusinessSetup({ business, onSave, onClose }: {
   onClose?: () => void;
 }) {
   const [name, setName] = useState(business?.name ?? '');
+  const [operatorName, setOperatorName] = useState(business?.operatorName ?? '');
   const [logo, setLogo] = useState(business?.logo);
   const [logoError, setLogoError] = useState('');
   const [readingLogo, setReadingLogo] = useState(false);
@@ -32,7 +34,7 @@ export function BusinessSetup({ business, onSave, onClose }: {
     if (!name.trim() || saving || readingLogo) return;
     setSaving(true);
     try {
-      await onSave({ name: name.trim(), profile, logo }, demo);
+      await onSave({ name: name.trim(), profile, logo, operatorName: operatorName.trim() || undefined }, demo);
     } finally {
       setSaving(false);
     }
@@ -45,6 +47,11 @@ export function BusinessSetup({ business, onSave, onClose }: {
         <label className="block text-sm">
           Nome comercial
           <input required maxLength={80} value={name} onChange={event => setName(event.target.value)}
+            className="mt-1 block w-full rounded border border-white/20 bg-[#141e22] p-2" />
+        </label>
+        <label className="block text-sm">
+          Nome do operador
+          <input maxLength={80} value={operatorName} onChange={event => setOperatorName(event.target.value)}
             className="mt-1 block w-full rounded border border-white/20 bg-[#141e22] p-2" />
         </label>
         <div className="space-y-2 text-sm">
