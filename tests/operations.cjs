@@ -40,6 +40,15 @@ async function main() {
     await page.getByLabel('Item da ordem').selectOption(product.id);
     await button('Adicionar item à ordem').click();
     await button('Salvar ordem').click();
+    await page.getByText(/OS nº 1 · Notebook teste/).waitFor();
+    await page.reload();
+    await button('Ordens de serviço').click();
+    await button('Nova ordem').click();
+    await page.getByLabel('Cliente', { exact: true }).fill('Segundo cliente');
+    await page.getByLabel('Equipamento').fill('Segundo equipamento');
+    await page.getByLabel('Defeito relatado').fill('Defeito de teste');
+    await button('Salvar ordem').click();
+    await page.getByText(/OS nº 2 · Segundo equipamento/).waitFor();
     await button('Enviar para o caixa').click();
     await page.getByText(/Ordem em cobrança.*Notebook teste/).waitFor();
     await button(/FINALIZAR VENDA \(F2\)/).click();
@@ -47,8 +56,8 @@ async function main() {
     await button(/CONFIRMAR VENDA/).click();
     await button(/CONFIRMAR VENDA/).waitFor({ state: 'hidden' });
     const charged = await snapshot();
-    assert.equal(charged.orders[0].saleId, charged.movements[0].id);
-    assert.equal(charged.movements[0].workOrderId, charged.orders[0].id);
+    assert.equal(charged.orders.find(order => order.number === 1).saleId, charged.movements[0].id);
+    assert.equal(charged.movements[0].workOrderId, charged.orders.find(order => order.number === 1).id);
     assert.equal(charged.movements[0].operation, 'repair');
     assert.equal(charged.movements[0].customerName, 'Cliente piloto');
     assert.equal(charged.products.find(entry => entry.id === product.id).stock, product.stock - 1);

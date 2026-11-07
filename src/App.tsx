@@ -101,6 +101,7 @@ function isBackup(value: unknown): value is { data: Snapshot } {
     optional(data.orders, entry => array(entry, item => record(item) &&
       ['id', 'customer', 'equipment', 'serial', 'issue', 'createdAt'].every(key => string(item[key])) &&
       number(item.quote) && typeof item.approved === 'boolean' && optional(item.saleId, string) &&
+      optional(item.number, entry => Number.isSafeInteger(entry) && Number(entry) > 0) &&
       optional(item.lines, lines => array(lines, line => record(line) && string(line.productId) &&
         Number.isSafeInteger(line.quantity) && Number(line.quantity) > 0)))) &&
     optional(data.cashClosings, entry => array(entry, item => record(item) &&
@@ -923,10 +924,16 @@ export default function App() {
       ) : workspace === 'ORDERS' ? (
         <WorkOrders orders={snapshot.orders ?? []} products={availableProducts} checkoutOrderId={snapshot.checkoutOrderId}
           onCharge={chargeOrder}
-          onSave={order => saveSnapshot(current => ({
-            ...current,
-            orders: [order, ...(current.orders ?? []).filter(entry => entry.id !== order.id)],
-          }))} />
+          onSave={order => saveSnapshot(current => {
+            const orders = current.orders ?? [];
+            const existing = orders.find(entry => entry.id === order.id);
+            const number = existing ? existing.number : orders.reduce((max, entry) => Math.max(max, entry.number ?? 0), 0) + 1;
+            const updated = { ...order, number };
+            return {
+              ...current,
+              orders: existing ? orders.map(entry => entry.id === order.id ? updated : entry) : [updated, ...orders],
+            };
+          })} />
       ) : workspace === 'SALES' ? (
         <SalesHistory movements={movements} invoices={invoices} businessName={business?.name} onReturn={returnSale} />
       ) : workspace === 'NFCE_HISTORY' ? (

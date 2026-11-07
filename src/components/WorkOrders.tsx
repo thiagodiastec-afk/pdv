@@ -3,6 +3,7 @@ import { formatBRL, type Product } from '../data/posData';
 
 export interface WorkOrder {
   id: string;
+  number?: number;
   customer: string;
   equipment: string;
   serial: string;
@@ -108,7 +109,7 @@ export function WorkOrders({ orders, products, checkoutOrderId, onSave, onCharge
         {orders.map(order => (
           <li key={order.id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-white/15 p-4">
             <div>
-              <strong>{order.equipment} · {order.customer}</strong>
+              <strong>{order.number ? 'OS nº ' + order.number + ' · ' : 'OS anterior · '}{order.equipment} · {order.customer}</strong>
               <p className="text-sm text-slate-300">{order.issue}{order.serial && ` · Série ${order.serial}`}</p>
               <p className="text-sm">{(order.lines ?? []).map(line =>
                 line.quantity + ' × ' + (products.find(product => product.id === line.productId)?.name ?? 'Item indisponível')
