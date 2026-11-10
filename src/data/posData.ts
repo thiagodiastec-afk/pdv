@@ -1,6 +1,8 @@
 export type CategoryId = 'Favoritos' | 'Bebidas' | 'Lanches' | 'Doces' | 'Outros';
 
 export interface Product {
+  kind?: 'service';
+  serviceCode?: string;
   id: string;
   code: string;
   barcode: string;
@@ -53,7 +55,17 @@ export interface FiscalInvoice {
   tribEstadual: number;
 }
 
+export type SaleOperation = 'counter' | 'repair';
+
 export interface CashMovement {
+  operation?: SaleOperation;
+  customerName?: string;
+  customerCpfCnpj?: string;
+  returnSaleId?: string;
+  authorizedBy?: string;
+  authorizedById?: string;
+  workOrderId?: string;
+  invoiceId?: string;
   id: string;
   type: 'ABERTURA' | 'VENDA' | 'SANGRIA' | 'SUPRIMENTO' | 'ESTORNO';
   amount: number;
@@ -62,6 +74,8 @@ export interface CashMovement {
   createdAt: string;
   operatorName: string;
   invoiceNumero?: number;
+  items?: CartItem[];
+  discount?: number;
 }
 
 export interface StoreFiscalConfig {

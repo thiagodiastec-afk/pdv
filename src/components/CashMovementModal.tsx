@@ -1,32 +1,33 @@
 import React, { useState } from 'react';
 import { X, ArrowDownRight, ArrowUpRight, Lock, Unlock, Wallet } from 'lucide-react';
 import { CashMovement, formatBRL } from '../data/posData';
+import { getCashBalance, type CashClosing } from '../data/cashShifts';
 
 interface CashMovementModalProps {
+  operatorName: string;
   isOpenRegister: boolean;
   movements: CashMovement[];
+  closings: CashClosing[];
   onClose: () => void;
-  onAddMovement: (type: 'SANGRIA' | 'SUPRIMENTO', amount: number, description: string) => void;
-  onToggleRegisterStatus: () => void;
+  onAddMovement: (type: 'SANGRIA' | 'SUPRIMENTO', amount: number, description: string) => Promise<boolean>;
+  onToggleRegisterStatus: (amount: number) => Promise<boolean>;
 }
 
 export const CashMovementModal: React.FC<CashMovementModalProps> = ({
+  operatorName,
   isOpenRegister,
   movements,
+  closings,
   onClose,
   onAddMovement,
   onToggleRegisterStatus,
 }) => {
   const [tab, setTab] = useState<'SANGRIA' | 'SUPRIMENTO' | 'RESUMO'>('SANGRIA');
+  const [cashAmount, setCashAmount] = useState(isOpenRegister ? '' : '0');
+  const [saving, setSaving] = useState(false);
   const [amountStr, setAmountStr] = useState<string>('');
   const [description, setDescription] = useState<string>('Retirada para cofre central');
 
-  const totalAbertura = movements
-    .filter((m) => m.type === 'ABERTURA')
-    .reduce((acc, m) => acc + m.amount, 0);
-  const totalVendasDinheiro = movements
-    .filter((m) => m.type === 'VENDA' && m.paymentMethod === 'DINHEIRO')
-    .reduce((acc, m) => acc + m.amount, 0);
   const totalVendasGerais = movements
     .filter((m) => m.type === 'VENDA')
     .reduce((acc, m) => acc + m.amount, 0);
@@ -37,22 +38,42 @@ export const CashMovementModal: React.FC<CashMovementModalProps> = ({
     .filter((m) => m.type === 'SUPRIMENTO')
     .reduce((acc, m) => acc + m.amount, 0);
 
-  const saldoGavetaDinheiro =
-    totalAbertura + totalVendasDinheiro + totalSuprimentos - totalSangrias;
+  const saldoGavetaDinheiro = getCashBalance(movements);
+  const counted = cashAmount.trim() === '' ? NaN : Number(cashAmount.replace(',', '.'));
+  const validCashAmount = Number.isFinite(counted) && counted >= 0;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  async function handleToggle() {
+    if (saving || !validCashAmount) return;
+    setSaving(true);
+    try {
+      if (await onToggleRegisterStatus(counted)) {
+        setCashAmount(isOpenRegister ? '0' : '');
+        setTab('RESUMO');
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (tab === 'RESUMO') return;
-    const val = parseFloat(amountStr.replace(',', '.')) || 0;
-    if (val <= 0) return;
-    onAddMovement(tab, val, description.trim() || (tab === 'SANGRIA' ? 'Sangria de caixa' : 'Suprimento de troco'));
-    setAmountStr('');
-    setTab('RESUMO');
+    if (tab === 'RESUMO' || !isOpenRegister || saving) return;
+    const val = Number(amountStr.replace(',', '.'));
+    if (!Number.isFinite(val) || val <= 0) return;
+    setSaving(true);
+    try {
+      if (await onAddMovement(tab, val, description.trim() || (tab === 'SANGRIA' ? 'Sangria de caixa' : 'Suprimento de troco'))) {
+        setAmountStr('');
+        setTab('RESUMO');
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
-      <div className="bg-[#1b272c] border border-white/10 rounded-xl max-w-xl w-full overflow-hidden shadow-2xl">
+      <div className="bg-[#1b272c] border border-white/10 rounded-xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 bg-[#141e22] border-b border-white/10">
           <div className="flex items-center gap-2.5">
@@ -62,7 +83,7 @@ export const CashMovementModal: React.FC<CashMovementModalProps> = ({
                 Gestão de Caixa & Sangria (F7)
               </h2>
               <p className="text-xs text-slate-400">
-                Status atual: {isOpenRegister ? 'Caixa Aberto' : 'Caixa Fechado'} · Operador Maurício
+                Status atual: {isOpenRegister ? 'Caixa Aberto' : 'Caixa Fechado'} · {operatorName}
               </p>
             </div>
           </div>
@@ -75,7 +96,7 @@ export const CashMovementModal: React.FC<CashMovementModalProps> = ({
         </div>
 
         {/* Mode Selector */}
-        <div className="px-6 pt-4 flex items-center justify-between gap-2 border-b border-white/10 pb-3">
+        <div className="px-6 pt-4 flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-3">
           <div className="flex items-center gap-1.5 bg-[#141e22] p-1 rounded-lg border border-white/10">
             <button
               type="button"
@@ -118,9 +139,17 @@ export const CashMovementModal: React.FC<CashMovementModalProps> = ({
             </button>
           </div>
 
+          <div className="flex flex-wrap items-end gap-2">
+          <label className="text-xs text-slate-300">
+            {isOpenRegister ? 'Dinheiro contado (R$)' : 'Saldo inicial (R$)'}
+            <input type="number" min="0" step="0.01" value={cashAmount}
+              onChange={event => setCashAmount(event.target.value)}
+              className="mt-1 block w-32 rounded bg-[#141e22] p-2 text-white" />
+          </label>
           <button
             type="button"
-            onClick={onToggleRegisterStatus}
+            disabled={saving || !validCashAmount}
+            onClick={handleToggle}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer ${
               isOpenRegister
                 ? 'border-amber-500/40 text-amber-300 hover:bg-amber-500/10'
@@ -139,6 +168,7 @@ export const CashMovementModal: React.FC<CashMovementModalProps> = ({
               </>
             )}
           </button>
+          </div>
         </div>
 
         {/* Body */}
@@ -165,7 +195,25 @@ export const CashMovementModal: React.FC<CashMovementModalProps> = ({
             </div>
           </div>
 
-          {tab !== 'RESUMO' ? (
+          {isOpenRegister && validCashAmount && (
+            <p className="text-xs text-slate-300">
+              Diferença prevista: {formatBRL(Math.round((counted - saldoGavetaDinheiro) * 100) / 100)}
+            </p>
+          )}
+          {closings.length > 0 && (
+            <details className="rounded-lg border border-white/10 p-3 text-sm" open={!isOpenRegister}>
+              <summary className="cursor-pointer font-semibold">Fechamentos registrados</summary>
+              <ul className="mt-2 max-h-40 space-y-2 overflow-y-auto">
+                {closings.map(closing => (
+                  <li key={closing.id} className="text-xs text-slate-300">
+                    <div>{closing.createdAt} · {closing.operatorName}</div>
+                    <div>Esperado {formatBRL(closing.expected)} · Contado {formatBRL(closing.counted)} · Diferença {formatBRL(closing.difference)}</div>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {isOpenRegister && tab !== 'RESUMO' ? (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">
@@ -206,6 +254,7 @@ export const CashMovementModal: React.FC<CashMovementModalProps> = ({
                 </button>
                 <button
                   type="submit"
+                  disabled={saving}
                   className="px-5 py-2 bg-[#00c885] hover:bg-[#00b377] text-slate-950 font-bold text-xs rounded-lg flex items-center gap-1.5 cursor-pointer"
                 >
                   {tab === 'SANGRIA' ? (
