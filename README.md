@@ -78,3 +78,9 @@ node tests/operations.cjs
 node tests/catalog-batch.cjs
 node tests/sales-history.cjs
 ```
+
+## Usuários e autorização de vendas
+
+Abra **Usuários** e cadastre o primeiro gerente. Depois, use o mesmo botão para cadastrar operadores e outros gerentes, cada um com sua senha. Use **Trocar usuário** para encerrar a sessão e entrar com outra conta. A troca de usuário mantém o turno de caixa aberto.
+
+Para cancelar uma nota simulada ou registrar uma devolução, selecione um gerente e digite a senha dele. O histórico registra o operador e o gerente que autorizou. Para corrigir uma venda concluída, use o estorno ou a devolução aplicável e registre a venda correta. As contas deste instalador são locais ao terminal e seguem no backup.

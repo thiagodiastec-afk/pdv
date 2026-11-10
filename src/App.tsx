@@ -46,6 +46,8 @@ import { CatalogFiscalView } from './components/CatalogFiscalView';
 import { FiscalConfigView } from './components/FiscalConfigView';
 import { ServiceFiscalSettings, type ServiceFiscalConfig } from './components/ServiceFiscalSettings';
 import { BackupSettings } from './components/BackupSettings';
+import { AccountDialog } from './components/AccountDialog';
+import type { Account } from './data/accounts';
 import { WorkOrders, type WorkOrder } from './components/WorkOrders';
 import { SalesHistory } from './components/SalesHistory';
 import { BusinessSetup, type Business } from './components/BusinessSetup';
@@ -55,6 +57,7 @@ type ActiveWorkspace = 'POS' | 'SALES' | 'NFCE_HISTORY' | 'CATALOG' | 'CONFIG_FI
 
 type Snapshot = {
   business?: Business;
+  accounts?: Account[];
   orders?: WorkOrder[];
   checkoutOrderId?: string;
   serviceFiscal?: ServiceFiscalConfig;
@@ -90,6 +93,10 @@ function isBackup(value: unknown): value is { data: Snapshot } {
       optional(item.operatorName, string) && optional(item.logo, logo => typeof logo === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(logo))) &&
     optional(data.serviceFiscal, item => record(item) &&
       ['municipality', 'municipalityCode', 'municipalRegistration', 'issuer'].every(key => string(item[key]))) &&
+    optional(data.accounts, entries => Array.isArray(entries) && array(entries, account => record(account) &&
+      ['id', 'name', 'salt', 'hash'].every(key => string(account[key])) &&
+      ['manager', 'operator'].includes(String(account.role))) &&
+      (entries.length === 0 || entries.some(account => account.role === 'manager'))) &&
     optional(data.registerOpen, item => typeof item === 'boolean') &&
     optional(data.checkoutOrderId, string) &&
     array(data.products, product) && items(data.cart) &&
@@ -143,7 +150,15 @@ export default function App() {
   const { products, invoices, movements, storeConfig, cart, business } = snapshot;
   const [showBusinessSetup, setShowBusinessSetup] = useState(false);
   const profile = business?.profile ?? 'mixed';
-  const operatorName = business?.operatorName ?? 'Operador local';
+  const accounts = snapshot.accounts ?? [];
+  const [sessionId, setSessionId] = useState<string>();
+  const [showAccounts, setShowAccounts] = useState(false);
+  const [approval, setApproval] = useState<{ resolve: (account: Account | null) => void } | null>(null);
+  const activeAccount = accounts.find(account => account.id === sessionId);
+  const loginRequired = accounts.length > 0 && !activeAccount;
+  const canManage = accounts.length === 0 || activeAccount?.role === 'manager';
+  const operatorName = activeAccount?.name ?? business?.operatorName ?? 'Operador local';
+  const accountDialogOpen = loginRequired || showAccounts || approval !== null;
   const availableProducts = products.filter(product =>
     profile === 'mixed' || (profile === 'services' ? product.kind === 'service' : product.kind !== 'service')
   );
@@ -297,6 +312,38 @@ export default function App() {
     return saved;
   }
 
+  async function registerAccount(account: Account) {
+    if (!canManage) return false;
+    const saved = await saveSnapshot(current => {
+      const users = current.accounts ?? [];
+      if ((users.length && !users.some(user => user.id === sessionId && user.role === 'manager')) ||
+        users.some(user => user.name.toLowerCase() === account.name.toLowerCase())) throw new Error('Cadastro indisponível');
+      return { ...current, accounts: [...users, account] };
+    });
+    if (saved) {
+      if (!accounts.length) setSessionId(account.id);
+      setShowAccounts(false);
+    }
+    return saved;
+  }
+
+  function authorizeManager() {
+    if (!accounts.length || loginRequired) {
+      triggerToast('Cadastre um gerente em Usuários para autorizar esta operação.');
+      return Promise.resolve(null);
+    }
+    return new Promise<Account | null>(resolve => setApproval({ resolve }));
+  }
+
+  function switchUser() {
+    setWorkspace('POS');
+    setShowCheckoutModal(false);
+    setShowCashModal(false);
+    setActiveDanfeInvoice(null);
+    setShowBusinessSetup(false);
+    setSessionId(undefined);
+  }
+
   function exportBackup() {
     const { saved: version, ...data } = snapshotRef.current;
     const url = URL.createObjectURL(new Blob([JSON.stringify({ format: 'CromaPDV', version: 1, data })], {
@@ -317,6 +364,7 @@ export default function App() {
       setCustomerCpf('');
       setCustomerName('');
       setWorkspace('POS');
+      if (value.data.accounts?.length) setSessionId(undefined);
       triggerToast('Backup restaurado.');
     }
     return saved;
@@ -417,7 +465,7 @@ export default function App() {
   // Global POS keyboard shortcuts (F1, F2, F3, F4, F6, F7, F8, Escape)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!business || showBusinessSetup) return;
+      if (!business || showBusinessSetup || accountDialogOpen) return;
       if (e.key === 'F1') {
         e.preventDefault();
         setShowHelpModal((v) => !v);
@@ -462,7 +510,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [workspace, cart.length, showInstallOptions, business, showBusinessSetup]);
+  }, [workspace, cart.length, showInstallOptions, business, showBusinessSetup, accountDialogOpen]);
 
   // Barcode / Quick Search Enter handler (supports "3*1001" or "7891000010013" or product name)
   const handleSearchKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -634,7 +682,11 @@ export default function App() {
       triggerToast('Abra o caixa para registrar a devolução.');
       return false;
     }
+    const manager = await authorizeManager();
+    if (!manager) return false;
     const saved = await saveSnapshot(current => {
+      if (!current.accounts?.some(account => account.id === manager.id && account.hash === manager.hash && account.role === 'manager') ||
+        !(current.registerOpen ?? true)) throw new Error('Autorização indisponível');
       const sale = current.movements.find(entry => entry.id === saleId && entry.type === 'VENDA');
       if (!sale?.items?.length || sale.invoiceNumero !== undefined || !reason.trim()) throw new Error('Venda indisponível');
       const previous = current.movements.filter(entry => entry.returnSaleId === saleId);
@@ -658,7 +710,7 @@ export default function App() {
       const reversal: CashMovement = {
         id: crypto.randomUUID(), type: 'ESTORNO', amount, paymentMethod: sale.paymentMethod,
         description: 'Devolução: ' + reason.trim(), createdAt: new Date().toLocaleString('pt-BR'),
-        operatorName, returnSaleId: saleId, items,
+        operatorName, authorizedBy: manager.name, authorizedById: manager.id, returnSaleId: saleId, items,
       };
       return {
         ...current, movements: [reversal, ...current.movements],
@@ -675,6 +727,8 @@ export default function App() {
   const handleCancelInvoice = async (invoiceId: string, reason: string) => {
     const target = invoices.find((i) => i.id === invoiceId);
     if (!target || target.status !== "AUTORIZADA") return;
+    const manager = await authorizeManager();
+    if (!manager) return;
 
     const now = new Date();
     const formattedTimestamp = `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR')}`;
@@ -687,9 +741,15 @@ export default function App() {
       createdAt: formattedTimestamp,
       operatorName,
       invoiceNumero: target.numero,
+      invoiceId: target.id,
+      authorizedBy: manager.name,
+      authorizedById: manager.id,
     };
     const saved = await saveSnapshot((current) => {
-      if (snapshotRef.current !== snapshot) throw new Error('Nota alterada durante o cancelamento');
+      if (snapshotRef.current !== snapshot ||
+        !current.accounts?.some(account => account.id === manager.id && account.hash === manager.hash && account.role === 'manager')) {
+        throw new Error('Nota ou autorização alterada durante o cancelamento');
+      }
       return {
         ...current,
         invoices: invoices.map((invoice) => invoice.id === invoiceId
@@ -775,7 +835,8 @@ export default function App() {
   const categories: CategoryId[] = ['Favoritos', 'Bebidas', 'Lanches', 'Doces', 'Outros'];
 
   return (
-    <div className="min-h-screen h-screen w-full bg-[#141e22] text-slate-100 flex flex-col select-none overflow-hidden">
+    <>
+    <div inert={accountDialogOpen} className="min-h-screen h-screen w-full bg-[#141e22] text-slate-100 flex flex-col select-none overflow-hidden">
       {/* Top Bar — Strict 3-Zone Contract matching reference POS layout */}
       <header className="h-16 px-5 bg-[#1b272c] border-b border-white/10 flex items-center justify-between gap-8 shrink-0">
         {/* Zone 1: Brand Emblem + Operator Profile */}
@@ -853,7 +914,7 @@ export default function App() {
               Notas Fiscais ({invoices.length})
             </button>
             <button
-              onClick={() => setWorkspace('CATALOG')}
+              disabled={!canManage} onClick={() => setWorkspace('CATALOG')}
               className={`whitespace-nowrap shrink-0 py-1 transition-colors cursor-pointer ${
                 workspace === 'CATALOG'
                   ? 'text-[#00c885] underline underline-offset-4 decoration-2'
@@ -865,9 +926,9 @@ export default function App() {
             {profile !== 'retail' && (
               <button className="shrink-0 text-slate-300" onClick={() => setWorkspace('ORDERS')}>Ordens de serviço</button>
             )}
-            <button className="shrink-0 text-slate-300" onClick={() => setWorkspace('BACKUP')}>Backup</button>
+            <button disabled={!canManage} className="shrink-0 text-slate-300" onClick={() => setWorkspace('BACKUP')}>Backup</button>
             <button
-              onClick={() => setWorkspace(profile === 'services' ? 'CONFIG_SERVICES' : 'CONFIG_FISCAL')}
+              disabled={!canManage} onClick={() => setWorkspace(profile === 'services' ? 'CONFIG_SERVICES' : 'CONFIG_FISCAL')}
               className={`whitespace-nowrap shrink-0 py-1 transition-colors cursor-pointer ${
                 (workspace === 'CONFIG_FISCAL' || workspace === 'CONFIG_SERVICES')
                   ? 'text-[#00c885] underline underline-offset-4 decoration-2'
@@ -880,6 +941,12 @@ export default function App() {
         </nav>
 
         {business && (
+          <div className="flex items-center gap-2 text-xs">
+            {canManage && <button type="button" onClick={() => setShowAccounts(true)}>Usuários</button>}
+            {activeAccount && <button type="button" onClick={switchUser}>Trocar usuário</button>}
+          </div>
+        )}
+        {business && canManage && (
           <button type="button" className="min-w-0 truncate text-sm text-slate-200"
             onClick={() => setShowBusinessSetup(true)} title="Meu negócio">
             {business.name} · Meu negócio
@@ -1655,5 +1722,21 @@ export default function App() {
         <DesktopInstallerModal onClose={() => setShowInstallerModal(false)} />
       )}
     </div>
+    {accountDialogOpen && (
+      <AccountDialog key={approval ? 'approval' : showAccounts ? 'create' : 'login'}
+        accounts={accounts} mode={approval ? 'approval' : showAccounts ? 'create' : 'login'}
+        onClose={approval ? () => { approval.resolve(null); setApproval(null); } :
+          showAccounts ? () => setShowAccounts(false) : undefined}
+        onAuthenticate={account => {
+          if (approval) {
+            approval.resolve(account);
+            setApproval(null);
+          } else {
+            setSessionId(account.id);
+          }
+        }}
+        onCreate={registerAccount} />
+    )}
+    </>
   );
 }

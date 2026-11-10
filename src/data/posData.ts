@@ -62,6 +62,8 @@ export interface CashMovement {
   customerName?: string;
   customerCpfCnpj?: string;
   returnSaleId?: string;
+  authorizedBy?: string;
+  authorizedById?: string;
   workOrderId?: string;
   invoiceId?: string;
   id: string;

@@ -148,7 +148,7 @@ function SaleDetails({ sale, invoice, returns, businessName, onReturn }: {
       {returns.length > 0 && (
         <ul aria-label="Devoluções registradas" className="space-y-1 text-slate-300">
           {returns.map(movement => (
-            <li key={movement.id}>{movement.createdAt} · {formatBRL(movement.amount)} · {movement.description}</li>
+            <li key={movement.id}>{movement.createdAt} · {formatBRL(movement.amount)} · {movement.description}{movement.authorizedBy && ' · Autorizado por ' + movement.authorizedBy}</li>
           ))}
         </ul>
       )}
@@ -231,7 +231,7 @@ export function SalesHistory({ movements, invoices, businessName, onReturn }: {
             </button>
             {selected === sale.id && (
               <SaleDetails sale={sale} invoice={invoice} businessName={businessName} onReturn={onReturn}
-                returns={movements.filter(movement => movement.returnSaleId === sale.id)} />
+                returns={movements.filter(movement => movement.returnSaleId === sale.id || (invoice && movement.type === 'ESTORNO' && movement.invoiceId === invoice.id))} />
             )}
           </li>
         ))}
