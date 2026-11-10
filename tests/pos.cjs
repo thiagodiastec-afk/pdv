@@ -23,7 +23,7 @@ const key = 'cromapdv_snapshot_v1';
     await cash.fill('0');
     assert(await confirm(page).isDisabled(), 'dinheiro insuficiente deve bloquear');
     console.log('PASS pagamento em dinheiro insuficiente');
-    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: /Voltar ao Cupom/ }).click();
     await checkout(page);
     await confirm(page).click();
     await confirm(page).waitFor({state:'hidden'});
